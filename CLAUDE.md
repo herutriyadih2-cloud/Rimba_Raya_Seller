@@ -34,7 +34,7 @@ Naikkan angka cache-busting `?v=N` di `index.html` setiap kali aset diganti.
 ```
 cd tests
 npm install        # sekali saja
-npm test           # harus: 53 LULUS, 0 GAGAL
+npm test           # harus: 70 LULUS, 0 GAGAL
 ```
 `e2e.js` menjalankan aplikasi di Chrome sungguhan, lalu **membuka kembali file
 .xlsx dan .pdf hasil unduhan** untuk memeriksa isinya. Membaca kode saja tidak

@@ -32,6 +32,8 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
       document.getElementById('harga' + k).value = v[1];
     });
   }, nama, tanggal, qtyHarga);
+  // gulir instan ke tombol: scroll halus dari aksi sebelumnya bisa membuat klik mendarat di navbar
+  await page.$eval('#btnSimpan', el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
   await page.click('#btnSimpan');
 }
 
@@ -43,7 +45,8 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   page.on('pageerror', e => errorKonsol.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errorKonsol.push('console.error: ' + m.text()); });
   page.on('requestfailed', r => errorKonsol.push('request gagal: ' + r.url()));
-  page.on('dialog', async d => { await d.accept(); });   // terima alert/confirm
+  const pesanDialog = [];
+  page.on('dialog', async d => { pesanDialog.push(d.message()); await d.accept(); });   // terima alert/confirm
 
   await page._client().send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
   await page.goto(PAGE, { waitUntil: 'networkidle0' });
@@ -216,6 +219,85 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   ])).length);
   cek('cadangan format lama tetap bisa dibaca', lama === 1, String(lama));
 
+  // 9c. FITUR HEMAT WAKTU
+  await isiForm(page, 'Harga Khusus', '2026-08-15', { 2000: [10, 1500], 3000: [0, 2400], 5000: [0, 4000], 75000: [0, 70000] });
+  let h = await page.evaluate(() => ({ tgl: document.getElementById('tanggal').value, nama: document.getElementById('namaReseller').value }));
+  cek('tanggal dipertahankan setelah simpan (input beruntun), nama dikosongkan',
+    h.tgl === '2026-08-15' && h.nama === '', JSON.stringify(h));
+  await page.evaluate(() => { pilihReseller('Harga Khusus'); });
+  h = await page.evaluate(() => ({
+    h2000: document.getElementById('harga2000').value,
+    info: document.getElementById('infoHargaTerakhir').textContent,
+    fokus: document.activeElement.id
+  }));
+  cek('memilih reseller mengisi harga dari transaksi terakhirnya', h.h2000 === '1500' && h.info.includes('15/08/2026'), JSON.stringify(h));
+  cek('setelah memilih reseller, kursor langsung ke kolom jumlah', h.fokus === 'qty2000', h.fokus);
+
+  await page.evaluate(() => { const q = document.getElementById('qty2000'); q.value = '10'; q.dispatchEvent(new Event('input')); });
+  h = await page.evaluate(() => document.getElementById('totalForm').textContent);
+  cek('total transaksi di form terhitung langsung (10 x 1.500)', h === 'Rp 15.000', h);
+
+  // peringatan sebelum menimpa
+  const sebelumDialog = pesanDialog.length;
+  await isiForm(page, 'Harga Khusus', '2026-08-15', { 2000: [12, 1500], 3000: [0, 2400], 5000: [0, 4000], 75000: [0, 70000] });
+  cek('menyimpan di atas data yang sama meminta konfirmasi menimpa',
+    pesanDialog.slice(sebelumDialog).some(m => m.includes('MENIMPA')), JSON.stringify(pesanDialog.slice(sebelumDialog)));
+  cek('data sesudah ditimpa benar (qty 12, tetap 4 baris)', await page.evaluate(() => {
+    const r = transactions.filter(t => t.reseller === 'Harga Khusus');
+    return r.length === 4 && r.find(t => t.nominal === 2000).qty === 12;
+  }));
+
+  // pencarian riwayat
+  const totalSebelumCari = await page.evaluate(() => document.getElementById('totalNilai').textContent);
+  await page.type('#cariRiwayat', 'siti');
+  h = await page.evaluate(() => ({
+    baris: document.querySelectorAll('#tbodyTransaksi tr').length,
+    hitung: document.getElementById('transactionCount').textContent,
+    total: document.getElementById('totalNilai').textContent
+  }));
+  cek('pencarian "siti" menyaring tabel jadi 4 baris', h.baris === 4, JSON.stringify(h));
+  cek('jumlah transaksi menampilkan "x dari y"', /dari/.test(h.hitung), h.hitung);
+  cek('pencarian tidak mengubah total keseluruhan', h.total === totalSebelumCari, h.total + ' vs ' + totalSebelumCari);
+  await page.$eval('#cariRiwayat', el => { el.value = '<b>zzz'; el.dispatchEvent(new Event('input')); });
+  h = await page.evaluate(() => ({ b: document.querySelectorAll('#tbodyTransaksi b').length, teks: document.querySelector('#tbodyTransaksi').textContent }));
+  cek('teks pencarian tidak jadi HTML & ada pesan "tidak ada yang cocok"', h.b === 0 && h.teks.includes('Tidak ada transaksi'), JSON.stringify(h));
+  await page.click('#btnBersihCari');
+  cek('tombol × membersihkan pencarian (semua baris kembali)',
+    await page.evaluate(() => document.querySelectorAll('#tbodyTransaksi tr').length === 12));
+
+  // ganti nama reseller (semua transaksinya ikut)
+  h = await page.evaluate(() => {
+    const a = jalankanGantiNama('Harga Khusus', 'Harga Spesial');
+    return { ok: a.ok, diubah: a.diubah,
+      lama: transactions.filter(t => t.reseller === 'Harga Khusus').length,
+      baru: transactions.filter(t => t.reseller === 'Harga Spesial').length,
+      masihAda: semuaReseller().includes('Harga Khusus') };
+  });
+  cek('ganti nama mengubah semua transaksi reseller itu',
+    h.ok && h.diubah === 4 && h.lama === 0 && h.baru === 4 && !h.masihAda, JSON.stringify(h));
+  h = await page.evaluate(() => {
+    const mk = (n, t) => nominalList.forEach(x => transactions.push({ id: Date.now() + Math.random(), reseller: n, tanggal: t,
+      nominal: x.key, nominalLabel: x.label, qty: 1, harga: x.defaultHarga, total: x.defaultHarga }));
+    mk('Tmp A', '2026-07-01'); mk('Tmp B', '2026-07-01'); mk('Tmp C', '2026-07-02');
+    const bentrok = jalankanGantiNama('Tmp A', 'tmp b');
+    const sisaA = transactions.filter(t => t.reseller === 'Tmp A').length;
+    const gabung = jalankanGantiNama('Tmp C', 'TMP B');
+    return { bentrok: bentrok.ok, sisaA, gabung: gabung.ok, tujuan: gabung.tujuan,
+      jumlahB: transactions.filter(t => t.reseller === 'Tmp B').length, sisaC: transactions.filter(t => t.reseller === 'Tmp C').length };
+  });
+  cek('gabung nama ditolak bila tanggal+nominal bentrok, data utuh', h.bentrok === false && h.sisaA === 4, JSON.stringify(h));
+  cek('gabung nama tanpa bentrok memakai ejaan yang sudah ada',
+    h.gabung && h.tujuan === 'Tmp B' && h.jumlahB === 8 && h.sisaC === 0, JSON.stringify(h));
+
+  // bersihkan data uji supaya hitungan di bawah tetap 8 baris
+  await page.evaluate(() => {
+    const uji = ['Tmp A', 'Tmp B', 'Tmp C', 'Harga Spesial', 'Harga Khusus'];
+    transactions = transactions.filter(t => !uji.includes(t.reseller));
+    daftarResellerTersimpan = daftarResellerTersimpan.filter(n => !uji.includes(n));
+    simpanDaftarReseller(); saveData(); renderTable(); resetForm();
+  });
+  cek('data uji fitur hemat waktu sudah dibersihkan (8 baris)', await page.evaluate(() => transactions.length === 8));
+
   // 10. EXPORT EXCEL
   errorKonsol.length = 0;
   await page.select('#exportFormat', 'excel');
@@ -274,6 +356,20 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   cek('PDF memuat halaman dashboard + tabel (>= 4 halaman)', jumlahHalaman >= 4, jumlahHalaman + ' halaman');
 
   cek('tidak ada error JS selama export', errorKonsol.length === 0, errorKonsol.join(' ; '));
+
+  // 11b. EXPORT khusus satu reseller
+  for (const f of fs.readdirSync(DL).filter(n => n.endsWith('.xlsx'))) fs.unlinkSync(path.join(DL, f));
+  await page.select('#exportFormat', 'excel');
+  await page.select('#exportReseller', 'Siti Agen');
+  await page.click('button[onclick="prosesExport()"]');
+  const fileSiti = await tungguUnduhan('.xlsx', 30000);
+  const wbSiti = new ExcelJS.Workbook();
+  await wbSiti.xlsx.readFile(fileSiti);
+  let totalSiti = null;
+  wbSiti.getWorksheet('Ringkasan Reseller').eachRow(r => { if (String(r.getCell(1).value) === 'TOTAL') totalSiti = nilaiSel(r.getCell(3).value); });
+  cek('export khusus reseller: total hanya milik reseller itu (118000)', totalSiti === 118000, String(totalSiti));
+  cek('nama file export memuat nama reseller', /Siti_Agen/.test(path.basename(fileSiti)), path.basename(fileSiti));
+  await page.select('#exportReseller', '');
 
   // 12. filter periode
   const hariIni = new Date().toISOString().slice(0, 10);
