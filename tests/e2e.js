@@ -169,28 +169,38 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(fileXlsx);
   const namaSheet = wb.worksheets.map(w => w.name);
-  cek('Excel punya 3 sheet yang benar',
-    namaSheet.join(',') === 'Rekap Harian per Reseller,Ringkasan Reseller,Grafik Penjualan', namaSheet.join(','));
+  cek('Excel punya 4 sheet yang benar',
+    namaSheet.join(',') === 'Rekap Harian per Reseller,Ringkasan Reseller,Grafik Penjualan,Panduan & Keterangan', namaSheet.join(','));
 
+  // Sel berisi rumus terbaca sebagai { formula, result }; sel biasa terbaca sebagai angka.
+  const nilaiSel = v => (v && typeof v === 'object' && 'result' in v) ? v.result : v;
   const ws = wb.getWorksheet('Rekap Harian per Reseller');
-  let barisIsi = 0, grandTotal = null;
+  let barisIsi = 0, grandTotal = null, barisData = null, adaRumus = false;
   ws.eachRow({ includeEmpty: false }, row => {
     barisIsi++;
-    if (String(row.getCell(1).value).includes('GRAND TOTAL')) grandTotal = row.getCell(7).value;
+    if (String(row.getCell(1).value).includes('GRAND TOTAL')) {
+      grandTotal = nilaiSel(row.getCell(7).value);
+      adaRumus = typeof row.getCell(7).value === 'object' && !!row.getCell(7).value.formula;
+    }
+    if (barisData === null && row.number >= 5 && typeof row.getCell(5).value === 'number') barisData = row;
   });
   cek('sheet rekap tidak kosong/terpotong', barisIsi >= 13, barisIsi + ' baris');
   cek('GRAND TOTAL di Excel = 318000', grandTotal === 318000, String(grandTotal));
+  cek('GRAND TOTAL berupa rumus (bukan angka mati)', adaRumus);
+  cek('tanggal & nominal di Excel berupa data sungguhan, bukan teks',
+    !!barisData && barisData.getCell(2).value instanceof Date && typeof barisData.getCell(4).value === 'number',
+    barisData ? typeof barisData.getCell(2).value + '/' + typeof barisData.getCell(4).value : 'tidak ada baris data');
   // bukan cuma ada di media â€” grafiknya harus benar-benar terpasang di dalam sheet
   cek('grafik benar-benar terpasang di sheet rekap', ws.getImages().length === 1,
     'gambar di sheet: ' + ws.getImages().length);
   const wsGrafik = wb.getWorksheet('Grafik Penjualan');
-  cek('grafik terpasang di sheet "Grafik Penjualan"',
-    !!wsGrafik && wsGrafik.getImages().length === 1,
+  cek('4 grafik terpasang di sheet "Grafik Penjualan"',
+    !!wsGrafik && wsGrafik.getImages().length === 4,
     wsGrafik ? 'gambar: ' + wsGrafik.getImages().length : 'sheet tidak ada');
 
   const wsRingkas = wb.getWorksheet('Ringkasan Reseller');
   let totalRingkas = null;
-  wsRingkas.eachRow(r => { if (String(r.getCell(1).value) === 'TOTAL') totalRingkas = r.getCell(3).value; });
+  wsRingkas.eachRow(r => { if (String(r.getCell(1).value) === 'TOTAL') totalRingkas = nilaiSel(r.getCell(3).value); });
   cek('TOTAL di sheet Ringkasan = 318000', totalRingkas === 318000, String(totalRingkas));
 
   // 11. EXPORT PDF
@@ -200,6 +210,9 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   const bufPdf = fs.readFileSync(filePdf);
   cek('file PDF terunduh', bufPdf.length > 3000, bufPdf.length + ' bytes');
   cek('file PDF berformat valid', bufPdf.slice(0, 5).toString() === '%PDF-');
+  // Laporan lengkap: 2 halaman dashboard + rekap + ringkasan (minimal 4 halaman)
+  const jumlahHalaman = (bufPdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+  cek('PDF memuat halaman dashboard + tabel (>= 4 halaman)', jumlahHalaman >= 4, jumlahHalaman + ' halaman');
 
   cek('tidak ada error JS selama export', errorKonsol.length === 0, errorKonsol.join(' ; '));
 

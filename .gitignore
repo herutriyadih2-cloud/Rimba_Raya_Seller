@@ -16,3 +16,6 @@ Thumbs.db
 # Jangan commit data pembukuan asli
 cadangan/
 Cadangan_*.json
+
+# Tangkapan layar sementara untuk percakapan
+tmp-screenshot/

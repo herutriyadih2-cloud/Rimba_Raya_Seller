@@ -1093,6 +1093,294 @@
         // ============================================================
         // EXCEL EXPORT
         // ============================================================
+        // ============================================================
+        // TEMA LAPORAN (Excel & PDF memakai warna yang sama)
+        // Hitam/arang untuk latar, emas sebagai satu-satunya aksen.
+        // ============================================================
+        const TEMA = {
+            hitam: '0B0D10',   // latar judul & total
+            arang: '14171C',   // panel/kartu & header tabel
+            garis: '262B33',   // garis halus di atas latar gelap
+            teks: 'F3F4F6',    // teks terang di atas gelap
+            redup: '9CA3AF',   // teks pendukung
+            emas: 'E0A526',    // aksen utama
+            emasMuda: 'F5C451',
+            emasTua: 'B8860B',
+            tembaga: 'B45309',
+            krem: 'F5F1E6',    // baris subtotal (terang, hangat)
+            garisTerang: 'D9D6CC',
+            tulisan: '1F2937'  // teks biasa di atas latar putih
+        };
+        const argb = h => ({ argb: 'FF' + h });
+        const rgbArr = h => [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16));
+
+        const rp = n => 'Rp ' + Math.round(n).toLocaleString('id-ID');
+        const pcs = n => Math.round(n).toLocaleString('id-ID') + ' pcs';
+        const persen = (a, b) => b ? (a / b * 100).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + '%' : '0%';
+        const rpRingkas = v => v >= 1e6 ? (v / 1e6).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + ' jt'
+            : v >= 1e3 ? (v / 1e3).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + ' rb' : String(v);
+        const tglPendek = iso => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+        const tglPanjang = iso => iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
+
+        // Menyiapkan semua angka turunan, kalimat penjelasan, dan gambar grafik (base64 PNG).
+        // Dipakai bersama oleh export Excel dan PDF supaya isinya selalu sama.
+        async function siapkanLaporan(filtered) {
+            const map = computeResellerSummary(filtered);
+            const totalsAll = computeTotals(filtered);
+            const jmlTransaksi = countUniqueGroups(filtered);
+            const ranking = Object.keys(map).map(n => ({ nama: n, qty: map[n].qty, nilai: map[n].nilai }))
+                .sort((x, y) => y.nilai - x.nilai || x.nama.localeCompare(y.nama));
+            // Grafik hanya menampilkan 7 teratas; sisanya digabung "Lainnya" supaya tetap terbaca.
+            const rankingChart = ranking.length > 8
+                ? [...ranking.slice(0, 7), ranking.slice(7).reduce((acc, r) => ({ nama: 'Lainnya (' + (ranking.length - 7) + ')', qty: acc.qty + r.qty, nilai: acc.nilai + r.nilai }), { qty: 0, nilai: 0 })]
+                : ranking;
+            const perNominal = nominalList.map(n => {
+                const rows = filtered.filter(t => t.nominal === n.key);
+                return { key: n.key, label: n.label, defaultHarga: n.defaultHarga,
+                    qty: rows.reduce((a, t) => a + t.qty, 0), nilai: rows.reduce((a, t) => a + t.total, 0) };
+            });
+            const perTanggalMap = {};
+            filtered.forEach(t => { perTanggalMap[t.tanggal] = (perTanggalMap[t.tanggal] || 0) + t.total; });
+            const perTanggal = Object.keys(perTanggalMap).sort().map(tgl => ({ tgl, nilai: perTanggalMap[tgl] }));
+
+            // Kalimat penjelasan otomatis
+            const teksPeringkat = ranking.length
+                ? `Reseller diurutkan dari pembelian terbesar. ${ranking[0].nama} paling besar: ${rp(ranking[0].nilai)} (${persen(ranking[0].nilai, totalsAll.nilai)} dari total).`
+                : '';
+            const top3 = ranking.slice(0, 3).reduce((a, r) => a + r.nilai, 0);
+            const teksPorsi = `Porsi tiap reseller terhadap total ${rp(totalsAll.nilai)}. ${Math.min(3, ranking.length)} reseller teratas menyumbang ${persen(top3, totalsAll.nilai)}.`;
+            const nomTerbanyak = [...perNominal].sort((x, y) => y.qty - x.qty)[0];
+            const nomTerbesar = [...perNominal].sort((x, y) => y.nilai - x.nilai)[0];
+            const teksNominal = nomTerbanyak && nomTerbanyak.qty > 0
+                ? `Paling banyak dibeli: ${nomTerbanyak.label} (${pcs(nomTerbanyak.qty)}). Penyumbang nilai terbesar: ${nomTerbesar.label} (${rp(nomTerbesar.nilai)}, ${persen(nomTerbesar.nilai, totalsAll.nilai)}).`
+                : 'Belum ada pembelian pada periode ini.';
+            const hariTertinggi = [...perTanggal].sort((x, y) => y.nilai - x.nilai)[0];
+            const teksTren = hariTertinggi
+                ? `Total pembelian per tanggal. Tertinggi: ${tglPanjang(hariTertinggi.tgl)} (${rp(hariTertinggi.nilai)}). Rata-rata per tanggal: ${rp(totalsAll.nilai / perTanggal.length)}.`
+                : '';
+
+            const hasil = { totalsAll, jmlTransaksi, ranking, perNominal, perTanggal,
+                teksPeringkat, teksPorsi, teksNominal, teksTren, gambar: null };
+            if (ranking.length === 0) return hasil;
+
+            // ---------- Grafik (tema gelap) ----------
+            const K = 2; // faktor resolusi: kanvas 2x agar tajam saat dizoom/dicetak
+            const W = 480 * K, H = 300 * K;
+            const C = {
+                latar: '#' + TEMA.arang, teks: '#E5E7EB', redup: '#' + TEMA.redup, grid: '#' + TEMA.garis,
+                emas: '#' + TEMA.emas, emasMuda: '#' + TEMA.emasMuda, emasTua: '#' + TEMA.emasTua
+            };
+            const warna = ['#E0A526', '#E5E7EB', '#9CA3AF', '#B45309', '#6B7280', '#F5C451', '#4B5563', '#374151'];
+            const fontGrafik = 'Inter, Arial, sans-serif';
+            const potong = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+            const latar = {
+                id: 'latar',
+                beforeDraw(chart) {
+                    const c = chart.ctx;
+                    c.save(); c.fillStyle = C.latar;
+                    c.fillRect(0, 0, chart.width, chart.height); c.restore();
+                }
+            };
+
+            async function renderChart(config) {
+                const canvas = document.createElement('canvas');
+                canvas.width = W; canvas.height = H;
+                canvas.style.position = 'fixed'; canvas.style.left = '-9999px';
+                document.body.appendChild(canvas);
+                config.plugins = [...(config.plugins || []), latar];
+                config.options = Object.assign({ responsive: false, animation: { duration: 0 }, devicePixelRatio: 1 }, config.options);
+                const chart = new Chart(canvas.getContext('2d'), config);
+                await new Promise(resolve => setTimeout(resolve, 150));
+                const base64 = canvas.toDataURL('image/png').split(',')[1];
+                chart.destroy();
+                document.body.removeChild(canvas);
+                return base64;
+            }
+
+            const gambar = {};
+            const maxNilai = Math.max(...rankingChart.map(r => r.nilai), 1);
+
+            // 1. Peringkat reseller: batang horizontal emas di atas jalur gelap
+            const jalurDanLabel = {
+                id: 'jalurDanLabel',
+                beforeDatasetsDraw(chart) {
+                    const c = chart.ctx, a = chart.chartArea;
+                    c.save(); c.fillStyle = '#1F242B';
+                    chart.getDatasetMeta(0).data.forEach(bar => {
+                        const t = bar.height, r = t / 2;
+                        c.beginPath(); c.roundRect(a.left, bar.y - r, a.right - a.left, t, r); c.fill();
+                    });
+                    c.restore();
+                },
+                afterDatasetsDraw(chart) {
+                    const c = chart.ctx;
+                    c.save(); c.textBaseline = 'middle'; c.textAlign = 'left';
+                    chart.getDatasetMeta(0).data.forEach((bar, i) => {
+                        const r = rankingChart[i];
+                        c.font = `bold ${11 * K}px ${fontGrafik}`; c.fillStyle = '#FFFFFF';
+                        const t1 = rp(r.nilai);
+                        c.fillText(t1, bar.x + 8 * K, bar.y);
+                        c.font = `${10 * K}px ${fontGrafik}`; c.fillStyle = C.redup;
+                        c.fillText(persen(r.nilai, totalsAll.nilai), bar.x + 8 * K + c.measureText(t1).width + 14 * K, bar.y);
+                    });
+                    c.restore();
+                }
+            };
+            gambar.peringkat = await renderChart({
+                type: 'bar',
+                plugins: [jalurDanLabel],
+                data: {
+                    labels: rankingChart.map(r => potong(r.nama, 16)),
+                    datasets: [{
+                        data: rankingChart.map(r => r.nilai),
+                        backgroundColor(ctx) {
+                            const a = ctx.chart.chartArea;
+                            if (!a) return C.emas;
+                            // Batang "Lainnya" (gabungan beberapa reseller) diberi abu-abu agar tidak disangka juara
+                            if (rankingChart.length < ranking.length && ctx.dataIndex === rankingChart.length - 1) return '#6B7280';
+                            const g = ctx.chart.ctx.createLinearGradient(a.left, 0, a.right, 0);
+                            g.addColorStop(0, C.emasTua); g.addColorStop(1, C.emasMuda);
+                            return g;
+                        },
+                        borderRadius: 14 * K, borderSkipped: false, categoryPercentage: 0.78, barPercentage: 0.7
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    layout: { padding: { left: 6 * K, right: 10 * K, top: 6 * K, bottom: 6 * K } },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { display: false, max: maxNilai * 1.7, beginAtZero: true },
+                        y: { grid: { display: false }, border: { display: false },
+                            ticks: { font: { family: fontGrafik, size: 11 * K, weight: '600' }, color: C.teks } }
+                    }
+                }
+            });
+
+            // 2. Porsi: donat dengan total di tengah
+            const tengahDonat = {
+                id: 'tengahDonat',
+                afterDraw(chart) {
+                    const m = chart.getDatasetMeta(0).data[0];
+                    if (!m) return;
+                    const c = chart.ctx;
+                    c.save(); c.textAlign = 'center'; c.textBaseline = 'middle';
+                    c.fillStyle = C.redup; c.font = `600 ${9 * K}px ${fontGrafik}`;
+                    c.fillText('TOTAL', m.x, m.y - 13 * K);
+                    c.fillStyle = '#FFFFFF'; c.font = `bold ${15 * K}px ${fontGrafik}`;
+                    c.fillText(rp(totalsAll.nilai), m.x, m.y + 8 * K);
+                    c.restore();
+                }
+            };
+            gambar.porsi = await renderChart({
+                type: 'doughnut',
+                plugins: [tengahDonat],
+                data: {
+                    labels: rankingChart.map(r => r.nama),
+                    datasets: [{ data: rankingChart.map(r => r.nilai), backgroundColor: warna, borderColor: C.latar, borderWidth: 4 * K, hoverOffset: 0 }]
+                },
+                options: {
+                    cutout: '68%',
+                    layout: { padding: 8 * K },
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                usePointStyle: true, pointStyle: 'circle', boxWidth: 9 * K, padding: 9 * K,
+                                font: { family: fontGrafik, size: 10 * K }, color: C.teks,
+                                generateLabels() {
+                                    return rankingChart.map((r, i) => ({
+                                        text: potong(r.nama, 15) + '  ' + persen(r.nilai, totalsAll.nilai),
+                                        fillStyle: warna[i % warna.length], strokeStyle: warna[i % warna.length],
+                                        fontColor: C.teks, pointStyle: 'circle', index: i
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 3. Komposisi per nominal voucher
+            const labelNominal = {
+                id: 'labelNominal',
+                afterDatasetsDraw(chart) {
+                    const c = chart.ctx;
+                    c.save(); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+                    chart.getDatasetMeta(0).data.forEach((bar, i) => {
+                        const n = perNominal[i];
+                        c.fillStyle = '#FFFFFF'; c.font = `bold ${10 * K}px ${fontGrafik}`;
+                        c.fillText(n.nilai ? rpRingkas(n.nilai) : '-', bar.x, bar.y - 22 * K);
+                        c.fillStyle = C.redup; c.font = `${9 * K}px ${fontGrafik}`;
+                        c.fillText(pcs(n.qty), bar.x, bar.y - 8 * K);
+                    });
+                    c.restore();
+                }
+            };
+            gambar.nominal = await renderChart({
+                type: 'bar',
+                plugins: [labelNominal],
+                data: {
+                    labels: perNominal.map(n => n.label),
+                    datasets: [{ data: perNominal.map(n => n.nilai), backgroundColor: perNominal.map((n, i) => warna[i % warna.length]),
+                        borderRadius: 12 * K, borderSkipped: false, barPercentage: 0.62, categoryPercentage: 0.8, minBarLength: 4 * K }]
+                },
+                options: {
+                    layout: { padding: { top: 10 * K, left: 4 * K, right: 10 * K, bottom: 4 * K } },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grace: '22%', border: { display: false }, grid: { color: C.grid }, ticks: { display: false } },
+                        x: { grid: { display: false }, border: { color: '#374151' },
+                            ticks: { font: { family: fontGrafik, size: 10 * K, weight: '600' }, color: C.teks } }
+                    }
+                }
+            });
+
+            // 4. Tren harian: area emas lembut dengan titik
+            const labelTitik = {
+                id: 'labelTitik',
+                afterDatasetsDraw(chart) {
+                    if (perTanggal.length > 12) return;
+                    const c = chart.ctx;
+                    c.save(); c.textAlign = 'center'; c.fillStyle = '#FFFFFF'; c.font = `bold ${9 * K}px ${fontGrafik}`;
+                    chart.getDatasetMeta(0).data.forEach((pt, i) => c.fillText(rpRingkas(perTanggal[i].nilai), pt.x, pt.y - 14 * K));
+                    c.restore();
+                }
+            };
+            gambar.tren = await renderChart({
+                type: 'line',
+                plugins: [labelTitik],
+                data: {
+                    labels: perTanggal.map(d => tglPendek(d.tgl)),
+                    datasets: [{
+                        data: perTanggal.map(d => d.nilai), fill: true, cubicInterpolationMode: 'monotone',
+                        borderColor: C.emas, borderWidth: 3 * K,
+                        backgroundColor(ctx) {
+                            const a = ctx.chart.chartArea;
+                            if (!a) return 'rgba(224,165,38,0.15)';
+                            const g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+                            g.addColorStop(0, 'rgba(224,165,38,0.34)'); g.addColorStop(1, 'rgba(224,165,38,0)');
+                            return g;
+                        },
+                        pointRadius: 5 * K, pointBackgroundColor: C.latar, pointBorderColor: C.emasMuda, pointBorderWidth: 3 * K
+                    }]
+                },
+                options: {
+                    layout: { padding: { top: 10 * K, left: 4 * K, right: 30 * K, bottom: 4 * K } },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grace: '25%', border: { display: false }, grid: { color: C.grid },
+                            ticks: { callback: v => rpRingkas(v), maxTicksLimit: 5, font: { family: fontGrafik, size: 9 * K }, color: C.redup } },
+                        x: { offset: true, grid: { display: false }, border: { color: '#374151' },
+                            ticks: { font: { family: fontGrafik, size: 9 * K }, color: C.teks, maxRotation: 0, autoSkip: true } }
+                    }
+                }
+            });
+
+            hasil.gambar = gambar;
+            return hasil;
+        }
+
         async function exportExcel(filtered, dataType, period) {
             try {
                 const workbook = new ExcelJS.Workbook();
@@ -1101,13 +1389,16 @@
                 const periodLabel = periodeLabel(period);
                 const printDate = new Date().toLocaleDateString('id-ID');
 
-                const indigo = { argb: 'FF4F46E5' };
-                const indigoDark = { argb: 'FF1E3A8A' };
+                // Palet hitam/arang dengan aksen emas (lihat TEMA)
+                const indigo = argb(TEMA.arang);          // header tabel
+                const indigoDark = argb(TEMA.hitam);      // judul & grand total
                 const white = { argb: 'FFFFFFFF' };
                 const gray = { argb: 'FF6B7280' };
-                const lightIndigo = { argb: 'FFEEF2FF' };
-                const borderColor = { argb: 'FFE5E7EB' };
-                const topBorderColor = { argb: 'FF9CA3AF' };
+                const lightIndigo = argb(TEMA.krem);      // baris subtotal
+                const borderColor = argb(TEMA.garisTerang);
+                const topBorderColor = argb('A8A293');
+                const emasArgb = argb(TEMA.emas);
+                const emasMudaArgb = argb(TEMA.emasMuda);
 
                 const thinBottom = { bottom: { style: 'thin', color: borderColor } };
                 const subBorder = {
@@ -1118,32 +1409,33 @@
                 function bandTitle(ws, title, subtitle, periodText, cols) {
                     ws.mergeCells(1, 1, 1, cols);
                     ws.getCell('A1').value = title;
-                    ws.getCell('A1').font = { name: 'Inter', bold: true, size: 16, color: white };
+                    ws.getCell('A1').font = { name: 'Calibri', bold: true, size: 16, color: white };
                     ws.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
                     ws.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
                     ws.getRow(1).height = 32;
 
                     ws.mergeCells(2, 1, 2, cols);
                     ws.getCell('A2').value = subtitle;
-                    ws.getCell('A2').font = { name: 'Inter', size: 10, color: white };
+                    ws.getCell('A2').font = { name: 'Calibri', size: 10, color: white };
                     ws.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
                     ws.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
 
                     ws.mergeCells(3, 1, 3, cols);
+                    for (let c = 1; c <= cols; c++) ws.getCell(3, c).border = { bottom: { style: 'medium', color: emasArgb } };
                     ws.getCell('A3').value = periodText;
-                    ws.getCell('A3').font = { name: 'Inter', size: 10, color: white };
+                    ws.getCell('A3').font = { name: 'Calibri', size: 10, color: white };
                     ws.getCell('A3').fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
                     ws.getCell('A3').alignment = { horizontal: 'center', vertical: 'middle' };
                 }
 
                 function applyHeader(row) {
                     row.eachCell(cell => {
-                        cell.font = { bold: true, color: white, name: 'Inter', size: 10 };
+                        cell.font = { bold: true, color: white, name: 'Calibri', size: 10 };
                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: indigo };
                         cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                         cell.border = {
                             top: { style: 'thin', color: borderColor },
-                            bottom: { style: 'thin', color: borderColor },
+                            bottom: { style: 'medium', color: emasArgb },
                             left: { style: 'thin', color: borderColor },
                             right: { style: 'thin', color: borderColor }
                         };
@@ -1152,9 +1444,9 @@
 
                 function applyData(row, alt) {
                     row.eachCell((cell, colNumber) => {
-                        cell.font = { name: 'Inter', size: 10, color: { argb: 'FF1F2937' } };
-                        const isCenter = (colNumber === 1 || colNumber === 5);
-                        const isRight = (colNumber === 6 || colNumber === 7);
+                        cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF1F2937' } };
+                        const isCenter = (colNumber === 1 || colNumber === 2 || colNumber === 4);
+                        const isRight = (colNumber >= 5);
                         cell.alignment = { vertical: 'middle', horizontal: isCenter ? 'center' : (isRight ? 'right' : 'left') };
                         cell.border = thinBottom;
                         if (alt) {
@@ -1163,85 +1455,44 @@
                     });
                 }
 
-                function moneyFmt(cell) { cell.numFmt = 'Rp #,##0'; }
-                function qtyFmt(cell) { cell.numFmt = '#,##0'; }
+                // Nilai nol tampil sebagai "-" supaya tabel mudah dipindai.
+                function moneyFmt(cell) { cell.numFmt = '"Rp" #,##0;-"Rp" #,##0;"-"'; }
+                function qtyFmt(cell) { cell.numFmt = '#,##0;-#,##0;"-"'; }
+
+                // Cetak: judul tabel diulang tiap halaman, lebar muat satu halaman, nomor halaman di kaki.
+                function pageSetup(ws, titleRow) {
+                    ws.pageSetup = {
+                        paperSize: 9, orientation: 'portrait',
+                        fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+                        margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.7, header: 0.3, footer: 0.3 },
+                        ...(titleRow ? { printTitlesRow: titleRow + ':' + titleRow } : {})
+                    };
+                    ws.headerFooter.oddFooter = '&L&8RIMBA RAYA SELLER&R&8Halaman &P dari &N';
+                }
 
                 const map = computeResellerSummary(filtered);
                 const sortedSellers = Object.keys(map).sort();
                 const values = sortedSellers.map(nama => map[nama].nilai);
 
-                // ============================================================
-                // Render chart image once
-                // ============================================================
-                let chartImageId = null;
-                if (sortedSellers.length > 0) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 900;
-                    canvas.height = 450;
-                    canvas.style.position = 'fixed';
-                    canvas.style.left = '-9999px';
-                    document.body.appendChild(canvas);
-                    const ctx = canvas.getContext('2d');
-
-                    const gradient = ctx.createLinearGradient(0, 0, 0, 450);
-                    gradient.addColorStop(0, '#6366F1');
-                    gradient.addColorStop(1, '#818CF8');
-
-                    new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: sortedSellers,
-                            datasets: [{
-                                label: 'Total Nilai (Rp)',
-                                data: values,
-                                backgroundColor: gradient,
-                                borderColor: '#4F46E5',
-                                borderWidth: 0,
-                                borderRadius: 8,
-                                barPercentage: 0.55
-                            }]
-                        },
-                        options: {
-                            responsive: false,
-                            animation: { duration: 0 },
-                            plugins: {
-                                legend: { display: false },
-                                title: {
-                                    display: true,
-                                    text: 'Total Penjualan per Reseller',
-                                    font: { size: 18, family: 'Inter', weight: 'bold' },
-                                    color: '#1E3A8A',
-                                    padding: { top: 10, bottom: 24 }
-                                }
-                            },
-                            scales: {
-                                y: {
-                                    beginAtZero: true,
-                                    grid: { color: '#E5E7EB' },
-                                    ticks: {
-                                        callback: function(v) { return 'Rp ' + v.toLocaleString('id-ID'); },
-                                        font: { family: 'Inter', size: 11 },
-                                        color: '#4B5563'
-                                    }
-                                },
-                                x: {
-                                    grid: { display: false },
-                                    ticks: { font: { family: 'Inter', size: 11 }, color: '#4B5563' }
-                                }
-                            }
-                        }
+                // Angka turunan, penjelasan, dan gambar grafik disiapkan oleh fungsi bersama
+                // (dipakai juga oleh export PDF agar isinya identik).
+                const lap = await siapkanLaporan(filtered);
+                const { totalsAll, jmlTransaksi, ranking, perNominal, perTanggal,
+                    teksPeringkat, teksPorsi, teksNominal, teksTren } = lap;
+                let chartImageId = null;   // addImage mengembalikan 0 untuk gambar pertama -> bandingkan dengan null
+                const gambar = {};
+                if (lap.gambar) {
+                    Object.keys(lap.gambar).forEach(k => {
+                        gambar[k] = workbook.addImage({ base64: lap.gambar[k], extension: 'png' });
                     });
-
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    const dataUrl = canvas.toDataURL('image/png');
-                    const base64 = dataUrl.split(',')[1];
-                    chartImageId = workbook.addImage({ base64: base64, extension: 'png' });
-                    document.body.removeChild(canvas);
+                    chartImageId = gambar.peringkat;
                 }
 
                 // ============================================================
                 // Sheet 1: Rekap Harian per Reseller
                 // ============================================================
+                let refRingkas = null; // posisi baris TOTAL di sheet Ringkasan (dipakai kartu dashboard)
+
                 if (dataType === 'transactions' || dataType === 'all') {
                     const ws = workbook.addWorksheet('Rekap Harian per Reseller');
                     ws.properties.showGridLines = false;
@@ -1256,71 +1507,133 @@
                     let grand = { qty: 0, total: 0 };
                     let currentRow = 5;
 
+                    const abuMuda = { argb: 'FF9AA5B5' };
+                    const subRows = [];
+
                     groups.forEach((g, idx) => {
-                        let gtot = { qty: 0, total: 0 };
                         const startGroupRow = currentRow;
+                        const gtot = { qty: 0, total: 0 };
+                        const [yy, mm, dd] = g.tanggal.split('-').map(Number);
+                        const tglExcel = new Date(Date.UTC(yy, mm - 1, dd));
 
                         nominalList.forEach((n, i) => {
                             const it = g.items[n.key];
-                            const r = ws.addRow([idx + 1, g.tanggal, g.reseller, it.nominalLabel, it.qty, it.harga, it.total]);
-                            applyData(r, i % 2 === 1);
+                            // Tanggal & nominal disimpan sebagai angka/tanggal sungguhan (bukan teks),
+                            // Total memakai rumus Jumlah x Harga. Hasil hitung ikut disimpan agar
+                            // terbaca juga oleh pembaca yang tidak menghitung ulang.
+                            const r = ws.addRow([idx + 1, tglExcel, g.reseller, n.key, it.qty, it.harga,
+                                { formula: `E${currentRow}*F${currentRow}`, result: it.total }]);
+                            applyData(r, false);
+                            r.getCell(2).numFmt = 'dd/mm/yyyy';
+                            r.getCell(4).numFmt = '"Rp" #,##0';
                             moneyFmt(r.getCell(6));
                             moneyFmt(r.getCell(7));
                             qtyFmt(r.getCell(5));
+                            // Nomor/tanggal/reseller diulang di tiap baris (agar bisa difilter),
+                            // tapi diredupkan setelah baris pertama supaya tabel tetap rapi.
+                            if (i > 0) {
+                                [1, 2, 3].forEach(c => { r.getCell(c).font = { name: 'Calibri', size: 10, color: abuMuda }; });
+                            } else {
+                                r.getCell(3).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1F2937' } };
+                            }
+                            r.height = 18;
                             gtot.qty += it.qty;
                             gtot.total += it.total;
                             currentRow++;
                         });
 
-                        const sub = ws.addRow(['Subtotal', '', '', '', gtot.qty, '', gtot.total]);
+                        const endGroupRow = currentRow - 1;
+                        const sub = ws.addRow(['Subtotal', '', '', '',
+                            { formula: `SUM(E${startGroupRow}:E${endGroupRow})`, result: gtot.qty }, '',
+                            { formula: `SUM(G${startGroupRow}:G${endGroupRow})`, result: gtot.total }]);
                         ws.mergeCells(currentRow, 1, currentRow, 4);
-                        sub.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-                        sub.getCell(1).font = { bold: true, color: indigo, name: 'Inter' };
-                        sub.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: lightIndigo };
+                        sub.height = 20;
                         sub.eachCell((cell, col) => {
-                            if (col === 1) return;
-                            cell.font = { bold: true, name: 'Inter', color: { argb: 'FF1F2937' } };
+                            cell.font = { bold: true, name: 'Calibri', size: 10, color: indigoDark };
                             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: lightIndigo };
                             cell.border = subBorder;
-                            cell.alignment = { vertical: 'middle', horizontal: col === 5 ? 'center' : 'right' };
+                            cell.alignment = { vertical: 'middle', horizontal: 'right' };
                         });
                         moneyFmt(sub.getCell(7));
                         qtyFmt(sub.getCell(5));
+                        subRows.push(currentRow);
                         currentRow++;
 
-                        ws.mergeCells(startGroupRow, 1, currentRow - 2, 1);
-                        ws.mergeCells(startGroupRow, 2, currentRow - 2, 2);
-                        ws.mergeCells(startGroupRow, 3, currentRow - 2, 3);
+                        // Jarak satu baris kosong antar kelompok (kecuali setelah kelompok terakhir)
+                        if (idx < groups.length - 1) {
+                            ws.addRow([]).height = 6;
+                            currentRow++;
+                        }
 
                         grand.qty += gtot.qty;
                         grand.total += gtot.total;
                     });
 
-                    const totalRow = ws.addRow(['GRAND TOTAL', '', '', '', grand.qty, '', grand.total]);
+                    // Grand total = jumlah semua baris Subtotal (kolom A bertuliskan "Subtotal")
+                    const rentangA = `$A$5:$A$${currentRow - 1}`;
+                    const totalRow = ws.addRow(['GRAND TOTAL', '', '', '',
+                        { formula: `SUMIF(${rentangA},"Subtotal",E$5:E$${currentRow - 1})`, result: grand.qty }, '',
+                        { formula: `SUMIF(${rentangA},"Subtotal",G$5:G$${currentRow - 1})`, result: grand.total }]);
+                    totalRow.height = 24;
                     ws.mergeCells(currentRow, 1, currentRow, 4);
                     totalRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-                    totalRow.getCell(1).font = { bold: true, color: white, name: 'Inter' };
+                    totalRow.getCell(1).font = { bold: true, color: white, name: 'Calibri' };
                     totalRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
                     totalRow.eachCell((cell, col) => {
                         if (col === 1) return;
-                        cell.font = { bold: true, color: white, name: 'Inter' };
+                        cell.font = { bold: true, color: emasMudaArgb, name: 'Calibri' };
                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
                         cell.border = subBorder;
-                        cell.alignment = { vertical: 'middle', horizontal: col === 5 ? 'center' : 'right' };
+                        cell.alignment = { vertical: 'middle', horizontal: 'right' };
                     });
                     moneyFmt(totalRow.getCell(7));
                     qtyFmt(totalRow.getCell(5));
                     currentRow++;
 
                     ws.columns = [
-                        { width: 6 }, { width: 13 }, { width: 24 }, { width: 18 }, { width: 14 }, { width: 19 }, { width: 18 }
+                        { width: 6 }, { width: 13 }, { width: 26 }, { width: 17 }, { width: 14 }, { width: 18 }, { width: 18 }
                     ];
-                    ws.views = [{ state: 'frozen', ySplit: 4 }];
+                    ws.views = [{ state: 'frozen', ySplit: 4, showGridLines: false }];
+                    ws.properties.tabColor = argb(TEMA.hitam);
+                    pageSetup(ws, 4);
 
                     // addImage mengembalikan 0 untuk gambar pertama, jadi harus dibanding
                     // dengan null — bukan sekadar if (chartImageId) yang menganggap 0 = kosong.
+                    // Keterangan singkat di bawah tabel
+                    const navyTeks = argb(TEMA.hitam);
+                    const rKet = ws.addRow([]); rKet.height = 8;
+                    const judulKet = ws.addRow(['Keterangan']);
+                    ws.mergeCells(judulKet.number, 1, judulKet.number, 7);
+                    judulKet.height = 22;
+                    judulKet.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: navyTeks };
+                    judulKet.getCell(1).border = { bottom: { style: 'medium', color: { argb: 'FFE0A526' } } };
+                    [
+                        'Total = Jumlah (pcs) x Harga per Voucher. Subtotal = jumlah semua nominal untuk satu reseller pada satu tanggal.',
+                        'Grand Total = penjumlahan seluruh Subtotal pada periode ini. Semua angka berupa rumus, sehingga ikut berubah bila Jumlah atau Harga diedit.',
+                        'Tanda "-" berarti tidak ada pembelian pada nominal tersebut. Teks abu-abu hanya pengulang nama/tanggal agar tabel mudah difilter.'
+                    ].forEach(t => {
+                        const r = ws.addRow([t]);
+                        ws.mergeCells(r.number, 1, r.number, 7);
+                        r.height = 20;
+                        r.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: gray };
+                        r.getCell(1).alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
+                    });
+                    ws.addRow([]).height = 10;
+
                     if (chartImageId !== null) {
-                        ws.addImage(chartImageId, { tl: { col: 1, row: currentRow + 1 }, ext: { width: 760, height: 380 } });
+                        const judulGrafik = ws.addRow(['Peringkat Reseller berdasarkan Total Pembelian']);
+                        ws.mergeCells(judulGrafik.number, 1, judulGrafik.number, 7);
+                        judulGrafik.height = 22;
+                        judulGrafik.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: navyTeks };
+                        judulGrafik.getCell(1).border = { bottom: { style: 'medium', color: { argb: 'FFE0A526' } } };
+                        // Baris berikutnya (indeks 0-based = judulGrafik.number) dipakai gambar: 480x300 px
+                        ws.addImage(chartImageId, { tl: { col: 0.2, row: judulGrafik.number + 0.3 }, ext: { width: 640, height: 400 } });
+                        for (let i = 0; i < 21; i++) ws.addRow([]);
+                        const rPen = ws.addRow([teksPeringkat]);
+                        ws.mergeCells(rPen.number, 1, rPen.number, 7);
+                        rPen.height = 30;
+                        rPen.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: gray };
+                        rPen.getCell(1).alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
                     }
                 }
 
@@ -1331,44 +1644,321 @@
                     const ws = workbook.addWorksheet('Ringkasan Reseller');
                     ws.properties.showGridLines = false;
 
-                    bandTitle(ws, 'RINGKASAN RESELLER', '', `Periode: ${periodLabel.replace(/_/g, ' ')}  •  Dicetak: ${printDate}`, 3);
+                    bandTitle(ws, 'RINGKASAN RESELLER', 'Total pembelian voucher WiFi per reseller', `Periode: ${periodLabel.replace(/_/g, ' ')}  •  Dicetak: ${printDate}`, 4);
 
-                    const headerRow = ws.addRow(['Reseller', 'Total Jumlah (pcs)', 'Total Nilai']);
+                    const headerRow = ws.addRow(['Reseller', 'Total Jumlah (pcs)', 'Total Nilai', 'Porsi']);
                     applyHeader(headerRow);
                     ws.getRow(4).height = 26;
 
+                    const awal = 5;
+                    const akhir = awal + sortedSellers.length - 1;
+                    const barisTotal = akhir + 1;
                     let grand = { qty: 0, nilai: 0 };
                     sortedSellers.forEach((nama, i) => {
-                        const r = map[nama];
-                        const row = ws.addRow([nama, r.qty, r.nilai]);
-                        applyData(row, i % 2 === 1);
+                        grand.qty += map[nama].qty;
+                        grand.nilai += map[nama].nilai;
+                    });
+                    ranking.forEach((r, i) => {
+                        const nama = r.nama;
+                        const baris = awal + i;
+                        const porsi = grand.nilai ? r.nilai / grand.nilai : 0;
+                        const row = ws.addRow([nama, r.qty, r.nilai,
+                            { formula: `IF(C$${barisTotal}=0,0,C${baris}/C$${barisTotal})`, result: porsi }]);
+                        applyData(row, false);
+                        row.height = 18;
+                        row.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1F2937' } };
+                        row.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+                        [2, 3, 4].forEach(c => { row.getCell(c).alignment = { vertical: 'middle', horizontal: 'right', indent: 1 }; });
                         moneyFmt(row.getCell(3));
                         qtyFmt(row.getCell(2));
-                        grand.qty += r.qty;
-                        grand.nilai += r.nilai;
+                        row.getCell(4).numFmt = '0.0%';
                     });
 
-                    const totalRow = ws.addRow(['TOTAL', grand.qty, grand.nilai]);
+                    const totalRow = ws.addRow(['TOTAL',
+                        sortedSellers.length ? { formula: `SUM(B${awal}:B${akhir})`, result: grand.qty } : 0,
+                        sortedSellers.length ? { formula: `SUM(C${awal}:C${akhir})`, result: grand.nilai } : 0,
+                        sortedSellers.length ? { formula: `SUM(D${awal}:D${akhir})`, result: grand.nilai ? 1 : 0 } : 0]);
+                    totalRow.height = 24;
                     totalRow.eachCell((cell, col) => {
-                        cell.font = { bold: true, color: white, name: 'Inter' };
+                        cell.font = { bold: true, color: col === 1 ? white : emasMudaArgb, name: 'Calibri' };
                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
                         cell.border = subBorder;
-                        cell.alignment = { vertical: 'middle', horizontal: col === 2 ? 'center' : 'right' };
+                        cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'right', indent: 1 };
                     });
                     moneyFmt(totalRow.getCell(3));
                     qtyFmt(totalRow.getCell(2));
+                    totalRow.getCell(4).numFmt = '0.0%';
+                    refRingkas = { baris: barisTotal };
 
-                    ws.columns = [{ width: 32 }, { width: 20 }, { width: 22 }];
+                    // ---- Tabel kedua: rincian per nominal voucher ----
+                    ws.addRow([]).height = 12;
+                    const judul2 = ws.addRow(['Rincian per Nominal Voucher']);
+                    ws.mergeCells(judul2.number, 1, judul2.number, 4);
+                    judul2.height = 24;
+                    judul2.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: argb(TEMA.hitam) };
+                    judul2.getCell(1).border = { bottom: { style: 'medium', color: { argb: 'FFE0A526' } } };
+
+                    const head2 = ws.addRow(['Nominal Voucher', 'Jumlah (pcs)', 'Total Nilai', 'Porsi']);
+                    applyHeader(head2);
+                    head2.height = 26;
+                    const awal2 = head2.number + 1;
+                    const akhir2 = awal2 + perNominal.length - 1;
+                    const tot2 = akhir2 + 1;
+                    perNominal.forEach((n, i) => {
+                        const row = ws.addRow([n.label, n.qty, n.nilai,
+                            { formula: `IF(C$${tot2}=0,0,C${awal2 + i}/C$${tot2})`, result: totalsAll.nilai ? n.nilai / totalsAll.nilai : 0 }]);
+                        applyData(row, false);
+                        row.height = 18;
+                        row.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1F2937' } };
+                        row.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+                        [2, 3, 4].forEach(c => { row.getCell(c).alignment = { vertical: 'middle', horizontal: 'right', indent: 1 }; });
+                        qtyFmt(row.getCell(2));
+                        moneyFmt(row.getCell(3));
+                        row.getCell(4).numFmt = '0.0%';
+                    });
+                    const total2 = ws.addRow(['JUMLAH',
+                        { formula: `SUM(B${awal2}:B${akhir2})`, result: totalsAll.qty },
+                        { formula: `SUM(C${awal2}:C${akhir2})`, result: totalsAll.nilai },
+                        { formula: `SUM(D${awal2}:D${akhir2})`, result: totalsAll.nilai ? 1 : 0 }]);
+                    total2.height = 24;
+                    total2.eachCell((cell, col) => {
+                        cell.font = { bold: true, color: col === 1 ? white : emasMudaArgb, name: 'Calibri' };
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: indigoDark };
+                        cell.border = subBorder;
+                        cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'right', indent: 1 };
+                    });
+                    qtyFmt(total2.getCell(2));
+                    moneyFmt(total2.getCell(3));
+                    total2.getCell(4).numFmt = '0.0%';
+
+                    // ---- Catatan pembacaan ----
+                    ws.addRow([]).height = 10;
+                    [
+                        'Cara membaca: reseller diurutkan dari pembelian terbesar. Porsi = Total Nilai reseller dibagi total keseluruhan.',
+                        teksPeringkat,
+                        teksNominal
+                    ].filter(Boolean).forEach(t => {
+                        const r = ws.addRow([t]);
+                        ws.mergeCells(r.number, 1, r.number, 4);
+                        r.height = 20;
+                        r.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: gray };
+                        r.getCell(1).alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
+                    });
+
+                    ws.columns = [{ width: 32 }, { width: 20 }, { width: 22 }, { width: 12 }];
+                    ws.views = [{ state: 'frozen', ySplit: 4, showGridLines: false }];
+                    ws.properties.tabColor = argb(TEMA.arang);
+                    pageSetup(ws, 4);
                 }
 
                 // ============================================================
-                // Sheet 3: Grafik Penjualan
+                // Sheet 3: Grafik Penjualan (dashboard gelap: kartu angka + 4 grafik + penjelasan)
                 // ============================================================
                 if (chartImageId !== null) {
-                    const chartSheet = workbook.addWorksheet('Grafik Penjualan');
-                    chartSheet.properties.showGridLines = false;
-                    bandTitle(chartSheet, 'GRAFIK TOTAL PENJUALAN', '', `Periode: ${periodLabel.replace(/_/g, ' ')}`, 6);
-                    chartSheet.addImage(chartImageId, { tl: { col: 1, row: 4 }, ext: { width: 800, height: 400 } });
+                    const ds = workbook.addWorksheet('Grafik Penjualan');
+                    const teksPeriode = `Periode: ${periodLabel.replace(/_/g, ' ')}  •  Dicetak: ${printDate}`;
+                    const isi = h => ({ type: 'pattern', pattern: 'solid', fgColor: argb(h) });
+                    const aksen = [TEMA.emas, 'E5E7EB', TEMA.tembaga, TEMA.redup].map(argb);
+                    const sekat = { left: { style: 'thick', color: argb(TEMA.hitam) } };
+
+                    ds.columns = Array.from({ length: 12 }, () => ({ width: 11 }));
+                    ds.views = [{ showGridLines: false }];
+                    ds.properties.tabColor = argb(TEMA.emas);
+
+                    // Latar gelap untuk seluruh area dashboard, panel arang untuk baris grafik
+                    for (let r = 1; r <= 48; r++) {
+                        for (let c = 1; c <= 12; c++) ds.getCell(r, c).fill = isi(TEMA.hitam);
+                    }
+                    const panel = (dari, sampai) => {
+                        for (let r = dari; r <= sampai; r++) {
+                            for (let c = 1; c <= 12; c++) {
+                                const cell = ds.getCell(r, c);
+                                cell.fill = isi(TEMA.arang);
+                                if (c === 7) cell.border = sekat;
+                            }
+                        }
+                    };
+                    panel(9, 26); panel(28, 45);
+
+                    bandTitle(ds, 'DASHBOARD PEMBELIAN RESELLER', 'Angka utama dan grafik pembelian voucher WiFi oleh reseller', teksPeriode, 12);
+                    ds.getRow(4).height = 10;
+
+                    // Kartu angka: tiap kartu selebar 3 kolom, tinggi 3 baris (5-7)
+                    const kartu = (kol, idx, label, nilai, fmt, sub, ukuran) => {
+                        for (let r = 5; r <= 7; r++) {
+                            ds.mergeCells(r, kol, r, kol + 2);
+                            for (let c = kol; c < kol + 3; c++) {
+                                const cell = ds.getCell(r, c);
+                                cell.fill = isi(TEMA.arang);
+                                cell.border = {
+                                    ...(r === 5 ? { top: { style: 'thick', color: aksen[idx] } } : {}),
+                                    ...(c === kol && idx > 0 ? sekat : {})
+                                };
+                            }
+                        }
+                        const l = ds.getCell(5, kol), v = ds.getCell(6, kol), t = ds.getCell(7, kol);
+                        l.value = label; l.font = { name: 'Calibri', size: 9, bold: true, color: argb(TEMA.redup) };
+                        l.alignment = { vertical: 'bottom', horizontal: 'left', indent: 1 };
+                        v.value = nilai; v.font = { name: 'Calibri', size: ukuran, bold: true, color: white };
+                        v.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+                        if (fmt) v.numFmt = fmt;
+                        t.value = sub; t.font = { name: 'Calibri', size: 9, color: argb(TEMA.redup) };
+                        t.alignment = { vertical: 'top', horizontal: 'left', indent: 1 };
+                    };
+                    ds.getRow(5).height = 22; ds.getRow(6).height = 36; ds.getRow(7).height = 22;
+                    const rataVoucher = totalsAll.qty ? totalsAll.nilai / totalsAll.qty : 0;
+                    kartu(1, 0, 'TOTAL NILAI PEMBELIAN',
+                        refRingkas ? { formula: `'Ringkasan Reseller'!C${refRingkas.baris}`, result: totalsAll.nilai } : totalsAll.nilai,
+                        '"Rp" #,##0', `dari ${jmlTransaksi} transaksi (reseller x tanggal)`, 20);
+                    kartu(4, 1, 'TOTAL VOUCHER DIBELI',
+                        refRingkas ? { formula: `'Ringkasan Reseller'!B${refRingkas.baris}`, result: totalsAll.qty } : totalsAll.qty,
+                        '#,##0" pcs"', `rata-rata ${rp(rataVoucher)} per voucher`, 20);
+                    kartu(7, 2, 'JUMLAH RESELLER', ranking.length, '#,##0',
+                        `rata-rata ${rp(totalsAll.nilai / ranking.length)} per reseller`, 20);
+                    kartu(10, 3, 'RESELLER TERBESAR', ranking[0].nama, null,
+                        `${rp(ranking[0].nilai)}  •  ${persen(ranking[0].nilai, totalsAll.nilai)} dari total`, 16);
+                    ds.getRow(8).height = 12;
+
+                    const judulBagian = (baris, kol, teks) => {
+                        ds.mergeCells(baris, kol, baris, kol + 5);
+                        const c = ds.getCell(baris, kol);
+                        c.value = teks;
+                        c.font = { name: 'Calibri', size: 12, bold: true, color: white };
+                        c.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+                        for (let k = kol; k < kol + 6; k++) {
+                            ds.getCell(baris, k).border = { bottom: { style: 'medium', color: argb(TEMA.emas) }, ...(k === 7 ? sekat : {}) };
+                        }
+                        ds.getRow(baris).height = 26;
+                    };
+                    const catatan = (baris, kol, teks) => {
+                        ds.mergeCells(baris, kol, baris, kol + 5);
+                        const c = ds.getCell(baris, kol);
+                        c.value = 'Penjelasan: ' + teks;
+                        c.font = { name: 'Calibri', size: 9, italic: true, color: argb(TEMA.redup) };
+                        c.alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+                        ds.getRow(baris).height = 40;
+                    };
+
+                    // Baris grafik diberi tinggi tetap (15 pt = 20 px) agar gambar 300 px tidak menimpa penjelasan.
+                    const tinggiGrafik = (dari, sampai) => { for (let r = dari; r <= sampai; r++) ds.getRow(r).height = 15; };
+                    tinggiGrafik(10, 25); tinggiGrafik(29, 44);
+
+                    // Baris 9: judul, 10-25: grafik, 26: penjelasan
+                    judulBagian(9, 1, '1. Peringkat Reseller');
+                    judulBagian(9, 7, '2. Porsi Pembelian');
+                    ds.addImage(gambar.peringkat, { tl: { col: 0.06, row: 9 }, ext: { width: 480, height: 300 } });
+                    ds.addImage(gambar.porsi, { tl: { col: 6.06, row: 9 }, ext: { width: 480, height: 300 } });
+                    catatan(26, 1, teksPeringkat);
+                    catatan(26, 7, teksPorsi);
+                    ds.getRow(27).height = 12;
+
+                    // Baris 28: judul, 29-44: grafik, 45: penjelasan
+                    judulBagian(28, 1, '3. Komposisi per Nominal Voucher');
+                    judulBagian(28, 7, '4. Tren Pembelian per Tanggal');
+                    ds.addImage(gambar.nominal, { tl: { col: 0.06, row: 28 }, ext: { width: 480, height: 300 } });
+                    ds.addImage(gambar.tren, { tl: { col: 6.06, row: 28 }, ext: { width: 480, height: 300 } });
+                    catatan(45, 1, teksNominal);
+                    catatan(45, 7, teksTren);
+                    ds.getRow(46).height = 12;
+
+                    ds.mergeCells(47, 1, 47, 12);
+                    const foot = ds.getCell(47, 1);
+                    foot.value = `Dibuat otomatis oleh RIMBA RAYA SELLER  •  ${jmlTransaksi} transaksi  •  ${ranking.length} reseller  •  Arti istilah ada di sheet "Panduan & Keterangan".`;
+                    foot.font = { name: 'Calibri', size: 9, color: argb(TEMA.redup) };
+                    foot.alignment = { horizontal: 'center', vertical: 'middle' };
+                    pageSetup(ds);
+                }
+
+                // ============================================================
+                // Sheet 4: Panduan & Keterangan
+                // ============================================================
+                {
+                    const ps = workbook.addWorksheet('Panduan & Keterangan');
+                    const teksPeriode = `Periode: ${periodLabel.replace(/_/g, ' ')}  •  Dicetak: ${printDate}`;
+                    const navyTeks = argb(TEMA.hitam);
+                    bandTitle(ps, 'PANDUAN & KETERANGAN LAPORAN', 'Cara membaca laporan ini dan arti setiap istilah', teksPeriode, 3);
+                    ps.columns = [{ width: 26 }, { width: 80 }, { width: 36 }];
+                    ps.views = [{ showGridLines: false }];
+                    ps.properties.tabColor = argb(TEMA.emas);
+
+                    const bagian = judul => {
+                        ps.addRow([]).height = 10;
+                        const r = ps.addRow([judul]);
+                        ps.mergeCells(r.number, 1, r.number, 3);
+                        r.height = 26;
+                        r.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: navyTeks };
+                        r.getCell(1).border = { bottom: { style: 'medium', color: { argb: 'FFE0A526' } } };
+                        r.getCell(1).alignment = { vertical: 'middle' };
+                    };
+                    const tabel = (header, baris) => {
+                        const h = ps.addRow(header);
+                        applyHeader(h);
+                        h.height = 22;
+                        baris.forEach(b => {
+                            const r = ps.addRow(b);
+                            const baris3 = Math.max(Math.ceil(String(b[0]).length / 24), Math.ceil(String(b[1]).length / 88), Math.ceil(String(b[2] || '').length / 40));
+                            r.height = Math.max(20, baris3 * 14 + 6);
+                            r.eachCell((cell, col) => {
+                                cell.font = { name: 'Calibri', size: 10, bold: col === 1, color: { argb: 'FF1F2937' } };
+                                cell.alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+                                cell.border = thinBottom;
+                            });
+                        });
+                    };
+
+                    bagian('Tentang laporan ini');
+                    const ringkasAbout = ps.addRow([`Laporan pembelian voucher WiFi oleh reseller untuk periode ${periodLabel.replace(/_/g, ' ')}: ${jmlTransaksi} transaksi dari ${ranking.length} reseller, total ${rp(totalsAll.nilai)} (${pcs(totalsAll.qty)}). Dibuat otomatis dari aplikasi RIMBA RAYA SELLER pada ${printDate}.`]);
+                    ps.mergeCells(ringkasAbout.number, 1, ringkasAbout.number, 3);
+                    ringkasAbout.height = 36;
+                    ringkasAbout.getCell(1).font = { name: 'Calibri', size: 10, color: { argb: 'FF1F2937' } };
+                    ringkasAbout.getCell(1).alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+
+                    bagian('Isi setiap sheet');
+                    const daftarSheet = [];
+                    if (dataType === 'transactions' || dataType === 'all') daftarSheet.push(['Rekap Harian per Reseller', 'Rincian pembelian: satu kelompok = satu reseller pada satu tanggal, dengan 4 nominal voucher, Subtotal, dan GRAND TOTAL.', 'Mengecek detail dan mencocokkan dengan catatan.']);
+                    if (dataType === 'reseller' || dataType === 'all') daftarSheet.push(['Ringkasan Reseller', 'Total jumlah dan nilai tiap reseller (urut terbesar), porsinya, serta rincian per nominal voucher.', 'Melihat siapa reseller terbesar dan nominal terlaris.']);
+                    if (chartImageId !== null) daftarSheet.push(['Grafik Penjualan', 'Dashboard: 4 kartu angka utama dan 4 grafik beserta penjelasannya.', 'Gambaran cepat untuk dibaca atau dicetak.']);
+                    daftarSheet.push(['Panduan & Keterangan', 'Sheet ini: arti istilah, cara membaca grafik, dan daftar harga default.', 'Rujukan bila ada angka yang membingungkan.']);
+                    tabel(['Sheet', 'Isi', 'Gunanya'], daftarSheet);
+
+                    bagian('Arti istilah dan kolom');
+                    tabel(['Istilah', 'Arti', 'Catatan'], [
+                        ['Reseller', 'Nama agen atau pembeli yang membeli voucher dalam jumlah banyak.', ''],
+                        ['Tanggal', 'Tanggal pembelian dicatat. Format hari/bulan/tahun.', 'Bisa diurutkan dan difilter.'],
+                        ['Nominal Voucher', 'Pecahan voucher yang dibeli: ' + nominalList.map(n => n.label).join(', ') + '.', ''],
+                        ['Jumlah (pcs)', 'Banyaknya lembar voucher yang dibeli pada nominal tersebut.', 'Tanda "-" = tidak ada pembelian.'],
+                        ['Harga per Voucher', 'Harga yang dibayar reseller untuk satu lembar voucher.', 'Dapat berbeda antar transaksi.'],
+                        ['Total', 'Jumlah (pcs) x Harga per Voucher.', 'Berupa rumus, otomatis menghitung ulang.'],
+                        ['Subtotal', 'Penjumlahan semua nominal untuk satu reseller pada satu tanggal.', ''],
+                        ['GRAND TOTAL', 'Penjumlahan seluruh Subtotal pada periode laporan.', 'Sama dengan TOTAL di Ringkasan Reseller.'],
+                        ['Porsi', 'Persentase nilai pembelian sebuah reseller (atau nominal) terhadap total keseluruhan.', 'Jumlah seluruh porsi = 100%.']
+                    ]);
+
+                    bagian('Cara membaca grafik');
+                    tabel(['Grafik', 'Cara membaca', 'Gunanya'], [
+                        ['Peringkat Reseller', 'Batang makin panjang = pembelian makin besar. Angka di ujung batang adalah nilai dan persentase dari total.', 'Mengetahui reseller terbesar.'],
+                        ['Porsi Pembelian', 'Donat dibagi menurut persentase tiap reseller. Angka di tengah adalah total keseluruhan.', 'Melihat ketergantungan pada reseller tertentu.'],
+                        ['Komposisi per Nominal', 'Tinggi batang = nilai rupiah tiap nominal. Di atas batang tertera nilai dan jumlah lembarnya.', 'Mengetahui nominal terlaris dan penyumbang nilai terbesar.'],
+                        ['Tren per Tanggal', 'Garis menghubungkan total pembelian tiap tanggal. Titik tertinggi = tanggal paling ramai.', 'Melihat naik turunnya pembelian dari hari ke hari.']
+                    ]);
+
+                    bagian('Harga default di aplikasi');
+                    tabel(['Nominal Voucher', 'Harga per voucher yang terisi otomatis saat input', 'Catatan'],
+                        nominalList.map(n => [n.label, rp(n.defaultHarga), 'Boleh diubah saat input transaksi.']));
+
+                    bagian('Catatan penting');
+                    [
+                        'Data pembukuan asli tersimpan di aplikasi (browser). Mengedit file Excel ini tidak mengubah data di aplikasi.',
+                        'Rumus akan menghitung ulang bila Jumlah atau Harga diedit di Excel; grafik berupa gambar sehingga tidak ikut berubah.',
+                        'Simpan cadangan data (.json) dari aplikasi secara berkala agar pembukuan tidak hilang bila browser dibersihkan.'
+                    ].forEach(t => {
+                        const r = ps.addRow(['•  ' + t]);
+                        ps.mergeCells(r.number, 1, r.number, 3);
+                        r.height = 22;
+                        r.getCell(1).font = { name: 'Calibri', size: 10, color: { argb: 'FF1F2937' } };
+                        r.getCell(1).alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+                    });
+                    pageSetup(ps);
                 }
 
                 const buffer = await workbook.xlsx.writeBuffer();
@@ -1397,21 +1987,43 @@
             const pageHeight = doc.internal.pageSize.getHeight();
             const periodLabel = periodeLabel(period);
             const printDate = new Date().toLocaleDateString('id-ID');
+            const margin = 12;
+
+            const c = h => rgbArr(h);
+            const warnaTeksGelap = c(TEMA.tulisan);
+            const halamanGelap = new Set();
 
             doc.setFont('helvetica');
 
+            // Angka turunan + gambar grafik: sama persis dengan yang dipakai export Excel
+            const lap = await siapkanLaporan(filtered);
+            const { totalsAll, jmlTransaksi, ranking, perNominal } = lap;
+
             function drawHeader() {
-                doc.setFillColor(30, 58, 138);
+                doc.setFillColor(...c(TEMA.hitam));
                 doc.rect(0, 0, pageWidth, 22, 'F');
+                doc.setFillColor(...c(TEMA.emas));
+                doc.rect(0, 22, pageWidth, 0.8, 'F');
                 doc.setTextColor(255, 255, 255);
                 doc.setFontSize(16);
                 doc.setFont('helvetica', 'bold');
                 doc.text('RIMBA RAYA SELLER', 14, 12);
                 doc.setFontSize(9);
                 doc.setFont('helvetica', 'normal');
+                doc.setTextColor(...c(TEMA.redup));
                 doc.text('Laporan Pembelian Voucher WiFi oleh Reseller', 14, 18);
+                doc.setTextColor(255, 255, 255);
                 doc.text(`Periode: ${periodLabel.replace(/_/g, ' ')}`, pageWidth - 14, 12, { align: 'right' });
+                doc.setTextColor(...c(TEMA.emasMuda));
                 doc.text(`Dicetak: ${printDate}`, pageWidth - 14, 18, { align: 'right' });
+            }
+
+            function halamanBaruGelap(pertama) {
+                if (!pertama) doc.addPage();
+                halamanGelap.add(doc.internal.getNumberOfPages());
+                doc.setFillColor(...c(TEMA.hitam));
+                doc.rect(0, 0, pageWidth, pageHeight, 'F');
+                drawHeader();
             }
 
             function addFooters() {
@@ -1419,19 +2031,120 @@
                 for (let i = 1; i <= pages; i++) {
                     doc.setPage(i);
                     doc.setFontSize(8);
-                    doc.setTextColor(100, 116, 139);
                     doc.setFont('helvetica', 'normal');
-                    doc.text(`Halaman ${i} dari ${pages}`, pageWidth - 14, pageHeight - 10, { align: 'right' });
+                    doc.setTextColor(...(halamanGelap.has(i) ? c(TEMA.redup) : [100, 116, 139]));
+                    doc.text('RIMBA RAYA SELLER', margin, pageHeight - 8);
+                    doc.text(`Halaman ${i} dari ${pages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
                 }
             }
 
-            let startY = 28;
-
-            if (dataType === 'transactions' || dataType === 'all') {
+            function judulBagian(teks, y) {
                 doc.setFontSize(11);
-                doc.setTextColor(30, 58, 138);
+                doc.setTextColor(...c(TEMA.hitam));
                 doc.setFont('helvetica', 'bold');
-                doc.text('Rekap Harian per Reseller', 14, startY);
+                doc.text(teks, 14, y);
+                doc.setDrawColor(...c(TEMA.emas));
+                doc.setLineWidth(0.7);
+                doc.line(14, y + 1.8, 14 + Math.min(90, doc.getTextWidth(teks) + 6), y + 1.8);
+            }
+
+            function catatanTeks(teks, y) {
+                doc.setFontSize(8);
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(100, 116, 139);
+                const baris = doc.splitTextToSize(teks, pageWidth - 28);
+                doc.text(baris, 14, y);
+                return y + baris.length * 3.6;
+            }
+
+            const gayaTabel = {
+                font: 'helvetica',
+                fontSize: 9,
+                cellPadding: 2,
+                valign: 'middle',
+                lineColor: c(TEMA.garisTerang),
+                lineWidth: 0.2,
+                textColor: warnaTeksGelap
+            };
+            const gayaHead = {
+                fillColor: c(TEMA.arang),
+                textColor: [255, 255, 255],
+                fontStyle: 'bold',
+                halign: 'center'
+            };
+
+            let startY = 30;
+
+            // ---------- Halaman dashboard (hanya untuk laporan lengkap) ----------
+            if (dataType === 'all' && lap.gambar) {
+                halamanBaruGelap(true);
+
+                // Kartu angka
+                const rataVoucher = totalsAll.qty ? totalsAll.nilai / totalsAll.qty : 0;
+                const kartuData = [
+                    ['TOTAL NILAI PEMBELIAN', rp(totalsAll.nilai), `dari ${jmlTransaksi} transaksi`, TEMA.emas, 15],
+                    ['TOTAL VOUCHER DIBELI', formatNumber(totalsAll.qty) + ' pcs', `rata-rata ${rp(rataVoucher)} / voucher`, 'E5E7EB', 15],
+                    ['JUMLAH RESELLER', String(ranking.length), `rata-rata ${rp(totalsAll.nilai / ranking.length)} / reseller`, TEMA.tembaga, 15],
+                    ['RESELLER TERBESAR', ranking[0].nama.length > 20 ? ranking[0].nama.slice(0, 19) + '…' : ranking[0].nama,
+                        `${rp(ranking[0].nilai)} • ${persen(ranking[0].nilai, totalsAll.nilai)} dari total`, TEMA.redup, 12]
+                ];
+                const gap = 4;
+                const lebarKartu = (pageWidth - margin * 2 - gap * 3) / 4;
+                kartuData.forEach((k, i) => {
+                    const x = margin + i * (lebarKartu + gap);
+                    doc.setFillColor(...c(TEMA.arang));
+                    doc.roundedRect(x, 30, lebarKartu, 23, 1.5, 1.5, 'F');
+                    doc.setFillColor(...c(k[3]));
+                    doc.rect(x, 30, lebarKartu, 1.2, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7);
+                    doc.setTextColor(...c(TEMA.redup));
+                    doc.text(k[0], x + 4, 37.5);
+                    doc.setFontSize(k[4]);
+                    doc.setTextColor(255, 255, 255);
+                    doc.text(k[1], x + 4, 45.5);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.setTextColor(...c(TEMA.redup));
+                    doc.text(k[2], x + 4, 50.5);
+                });
+
+                // Panel grafik: 2 kolom
+                const lebarPanel = (pageWidth - margin * 2 - gap) / 2;
+                const lebarGambar = lebarPanel - 6;
+                const tinggiGambar = lebarGambar * 300 / 480;
+                const tinggiPanel = 9 + tinggiGambar + 14;
+                const panelGrafik = (x, y, judul, kunci, teks) => {
+                    doc.setFillColor(...c(TEMA.arang));
+                    doc.roundedRect(x, y, lebarPanel, tinggiPanel, 1.5, 1.5, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(10);
+                    doc.setTextColor(255, 255, 255);
+                    doc.text(judul, x + 4, y + 6);
+                    doc.setDrawColor(...c(TEMA.emas));
+                    doc.setLineWidth(0.5);
+                    doc.line(x + 4, y + 7.6, x + lebarPanel - 4, y + 7.6);
+                    doc.addImage('data:image/png;base64,' + lap.gambar[kunci], 'PNG', x + 3, y + 9, lebarGambar, tinggiGambar);
+                    doc.setFont('helvetica', 'italic');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...c(TEMA.redup));
+                    doc.text(doc.splitTextToSize('Penjelasan: ' + teks, lebarPanel - 8), x + 4, y + 9 + tinggiGambar + 5);
+                };
+                const xKiri = margin, xKanan = margin + lebarPanel + gap;
+                panelGrafik(xKiri, 58, '1. Peringkat Reseller', 'peringkat', lap.teksPeringkat);
+                panelGrafik(xKanan, 58, '2. Porsi Pembelian', 'porsi', lap.teksPorsi);
+
+                halamanBaruGelap(false);
+                panelGrafik(xKiri, 30, '3. Komposisi per Nominal Voucher', 'nominal', lap.teksNominal);
+                panelGrafik(xKanan, 30, '4. Tren Pembelian per Tanggal', 'tren', lap.teksTren);
+
+                doc.addPage();
+                startY = 30;
+            }
+
+            // ---------- Rekap harian per reseller ----------
+            if (dataType === 'transactions' || dataType === 'all') {
+                judulBagian('Rekap Harian per Reseller', startY);
                 startY += 5;
 
                 const groups = groupByDateSeller(filtered);
@@ -1444,12 +2157,12 @@
                     nominalList.forEach(n => {
                         const it = g.items[n.key];
                         body.push([
-                            g.tanggal,
+                            tglPanjang(g.tanggal),
                             g.reseller,
                             it.nominalLabel,
-                            formatNumber(it.qty),
+                            it.qty ? formatNumber(it.qty) : '-',
                             formatRupiah(it.harga),
-                            formatRupiah(it.total)
+                            it.total ? formatRupiah(it.total) : '-'
                         ]);
                         gtot.qty += it.qty;
                         gtot.total += it.total;
@@ -1465,108 +2178,119 @@
                     head: headers,
                     body: body,
                     startY: startY,
-                    styles: {
-                        font: 'helvetica',
-                        fontSize: 9,
-                        cellPadding: 2,
-                        valign: 'middle',
-                        lineColor: [229, 231, 235],
-                        lineWidth: 0.2
-                    },
-                    headStyles: {
-                        fillColor: [79, 70, 229],
-                        textColor: [255, 255, 255],
-                        fontStyle: 'bold',
-                        halign: 'center'
-                    },
+                    styles: gayaTabel,
+                    headStyles: gayaHead,
                     theme: 'plain',
-                    alternateRowStyles: { fillColor: [249, 250, 251] },
                     columnStyles: {
                         0: { halign: 'center' },
-                        3: { halign: 'center' },
+                        2: { halign: 'center' },
+                        3: { halign: 'right' },
                         4: { halign: 'right' },
                         5: { halign: 'right' }
                     },
                     didParseCell: function(data) {
                         const raw = data.row.raw;
+                        if (data.section === 'head') {
+                            data.cell.styles.lineColor = c(TEMA.emas);
+                        }
                         if (raw && typeof raw[2] === 'string' && raw[2] === 'Subtotal') {
                             data.cell.styles.fontStyle = 'bold';
-                            data.cell.styles.fillColor = [238, 242, 255];
-                            data.cell.styles.textColor = [79, 70, 229];
+                            data.cell.styles.fillColor = c(TEMA.krem);
+                            data.cell.styles.textColor = c(TEMA.hitam);
                         }
                         if (raw && typeof raw[2] === 'string' && raw[2] === 'Grand Total') {
                             data.cell.styles.fontStyle = 'bold';
-                            data.cell.styles.fillColor = [30, 58, 138];
-                            data.cell.styles.textColor = [255, 255, 255];
+                            data.cell.styles.fillColor = c(TEMA.hitam);
+                            data.cell.styles.textColor = c(TEMA.emasMuda);
                         }
                     },
                     didDrawPage: function() { drawHeader(); },
-                    margin: { top: 28, left: 12, right: 12, bottom: 18 }
+                    margin: { top: 28, left: margin, right: margin, bottom: 18 }
                 });
 
-                startY = doc.lastAutoTable.finalY + 10;
+                startY = doc.lastAutoTable.finalY + 6;
+                startY = catatanTeks('Total = Jumlah x Harga per Voucher. Subtotal = jumlah semua nominal untuk satu reseller pada satu tanggal. Grand Total = penjumlahan seluruh Subtotal. Tanda "-" berarti tidak ada pembelian.', startY) + 6;
             }
 
+            // ---------- Ringkasan reseller + rincian nominal ----------
             if (dataType === 'reseller' || dataType === 'all') {
-                if (startY > pageHeight - 50) {
+                if (startY > pageHeight - 60) {
                     doc.addPage();
-                    startY = 28;
+                    startY = 30;
                 }
-                doc.setFontSize(11);
-                doc.setTextColor(30, 58, 138);
-                doc.setFont('helvetica', 'bold');
-                doc.text('Ringkasan Reseller', 14, startY);
+                judulBagian('Ringkasan Reseller', startY);
                 startY += 5;
 
-                const map = computeResellerSummary(filtered);
-                const body = Object.keys(map).sort().map(nama => [
-                    nama,
-                    formatNumber(map[nama].qty) + ' pcs',
-                    formatRupiah(map[nama].nilai)
+                const body = ranking.map(r => [
+                    r.nama,
+                    formatNumber(r.qty) + ' pcs',
+                    formatRupiah(r.nilai),
+                    persen(r.nilai, totalsAll.nilai)
                 ]);
+                body.push(['TOTAL', formatNumber(totalsAll.qty) + ' pcs', formatRupiah(totalsAll.nilai), totalsAll.nilai ? '100%' : '0%']);
 
-                const grand = Object.values(map).reduce((a, r) => {
-                    a.qty += r.qty;
-                    a.nilai += r.nilai;
-                    return a;
-                }, { qty: 0, nilai: 0 });
+                const gayaRingkas = {
+                    styles: Object.assign({}, gayaTabel, { fontSize: 10 }),
+                    headStyles: gayaHead,
+                    theme: 'plain',
+                    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+                    margin: { top: 28, left: margin, right: margin, bottom: 18 },
+                    didDrawPage: function() { drawHeader(); }
+                };
+                const barisTotal = baris => baris && (baris[0] === 'TOTAL' || baris[0] === 'JUMLAH');
 
-                body.push(['TOTAL', formatNumber(grand.qty) + ' pcs', formatRupiah(grand.nilai)]);
-
-                doc.autoTable({
-                    head: [['Reseller', 'Total Jumlah (pcs)', 'Total Nilai']],
+                doc.autoTable(Object.assign({}, gayaRingkas, {
+                    head: [['Reseller', 'Total Jumlah (pcs)', 'Total Nilai', 'Porsi']],
                     body: body,
                     startY: startY,
-                    styles: {
-                        font: 'helvetica',
-                        fontSize: 10,
-                        cellPadding: 2,
-                        valign: 'middle',
-                        lineColor: [229, 231, 235],
-                        lineWidth: 0.2
-                    },
-                    headStyles: {
-                        fillColor: [79, 70, 229],
-                        textColor: [255, 255, 255],
-                        fontStyle: 'bold',
-                        halign: 'center'
-                    },
-                    theme: 'plain',
-                    alternateRowStyles: { fillColor: [249, 250, 251] },
-                    columnStyles: {
-                        1: { halign: 'center' },
-                        2: { halign: 'right' }
-                    },
                     didParseCell: function(data) {
-                        if (data.row.raw && data.row.raw[0] === 'TOTAL') {
+                        if (data.section === 'head') data.cell.styles.lineColor = c(TEMA.emas);
+                        if (data.section === 'body' && data.column.index === 0) data.cell.styles.fontStyle = 'bold';
+                        if (barisTotal(data.row.raw)) {
                             data.cell.styles.fontStyle = 'bold';
-                            data.cell.styles.fillColor = [30, 58, 138];
-                            data.cell.styles.textColor = [255, 255, 255];
+                            data.cell.styles.fillColor = c(TEMA.hitam);
+                            data.cell.styles.textColor = c(TEMA.emasMuda);
                         }
-                    },
-                    didDrawPage: function() { drawHeader(); },
-                    margin: { top: 28, left: 12, right: 12, bottom: 18 }
-                });
+                    }
+                }));
+
+                startY = doc.lastAutoTable.finalY + 10;
+                if (startY > pageHeight - 60) {
+                    doc.addPage();
+                    startY = 30;
+                }
+                judulBagian('Rincian per Nominal Voucher', startY);
+                startY += 5;
+
+                const bodyNominal = perNominal.map(n => [
+                    n.label,
+                    formatNumber(n.qty) + ' pcs',
+                    formatRupiah(n.nilai),
+                    persen(n.nilai, totalsAll.nilai)
+                ]);
+                bodyNominal.push(['JUMLAH', formatNumber(totalsAll.qty) + ' pcs', formatRupiah(totalsAll.nilai), totalsAll.nilai ? '100%' : '0%']);
+
+                doc.autoTable(Object.assign({}, gayaRingkas, {
+                    head: [['Nominal Voucher', 'Jumlah (pcs)', 'Total Nilai', 'Porsi']],
+                    body: bodyNominal,
+                    startY: startY,
+                    didParseCell: function(data) {
+                        if (data.section === 'head') data.cell.styles.lineColor = c(TEMA.emas);
+                        if (data.section === 'body' && data.column.index === 0) data.cell.styles.fontStyle = 'bold';
+                        if (barisTotal(data.row.raw)) {
+                            data.cell.styles.fontStyle = 'bold';
+                            data.cell.styles.fillColor = c(TEMA.hitam);
+                            data.cell.styles.textColor = c(TEMA.emasMuda);
+                        }
+                    }
+                }));
+
+                startY = doc.lastAutoTable.finalY + 6;
+                if (startY > pageHeight - 30) {
+                    doc.addPage();
+                    startY = 30;
+                }
+                catatanTeks('Porsi = Total Nilai dibagi total keseluruhan. ' + [lap.teksPeringkat, lap.teksNominal].filter(Boolean).join(' '), startY);
             }
 
             addFooters();

@@ -6,6 +6,7 @@
   "scripts": {
     "verify": "node verify.js",
     "e2e": "node e2e.js",
+    "lihat": "node lihat.js",
     "test": "node verify.js && node e2e.js"
   },
   "dependencies": {

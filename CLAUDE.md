@@ -34,7 +34,7 @@ Naikkan angka cache-busting `?v=N` di `index.html` setiap kali aset diganti.
 ```
 cd tests
 npm install        # sekali saja
-npm test           # harus: 38 LULUS, 0 GAGAL
+npm test           # harus: 41 LULUS, 0 GAGAL
 ```
 `e2e.js` menjalankan aplikasi di Chrome sungguhan, lalu **membuka kembali file
 .xlsx dan .pdf hasil unduhan** untuk memeriksa isinya. Membaca kode saja tidak
@@ -68,6 +68,11 @@ nomor kolom.
 - Pernah ditambahkan sheet Sampul + `pageSetup` landscape fit-to-page pada export
   Excel, hasilnya **file kosong/terpotong**. Sudah direvert. Kalau mau dicoba lagi,
   wajib lewat `tests/e2e.js`.
+- Export Excel memakai **rumus** (Total, Subtotal, Grand Total). ExcelJS membacanya sebagai
+  `{ formula, result }`, bukan angka — tes harus membaca `.result`.
+- Tema laporan Excel & PDF (hitam/arang + aksen emas) dipusatkan di konstanta `TEMA`;
+  angka turunan, penjelasan, dan gambar grafik dibuat sekali oleh `siapkanLaporan()` dan
+  dipakai bersama `exportExcel` & `exportPDF`. Ubah warna/isi di sana, jangan di dua tempat.
 - Nama reseller diketik bebas lalu masuk `innerHTML`. Selalu lewat `escapeHtml()`.
 
 ## Gaya penulisan
