@@ -1,0 +1,78 @@
+{
+  "folders": [
+    {
+      "name": "RIMBA RAYA SELLER",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/__pycache__": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "web/assets/js": true,
+      "web/assets/css": true,
+      "web/assets/fonts": true,
+      "web/assets/webfonts": true
+    },
+    "editor.formatOnSave": false,
+    "editor.tabSize": 4,
+    "editor.wordWrap": "on",
+    "files.eol": "\r\n",
+    "[html]": { "editor.tabSize": 4 },
+    "[javascript]": { "editor.tabSize": 2 },
+    "[json]": { "editor.tabSize": 2 },
+    "[markdown]": { "editor.tabSize": 2 },
+    "liveServer.settings.root": "/web"
+  },
+  "extensions": {
+    "recommendations": [
+      "ritwickdey.LiveServer",
+      "formulahendry.auto-close-tag",
+      "ecmel.vscode-html-css",
+      "eamodio.gitlens",
+      "ms-python.python"
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Jalankan Pemeriksaan (npm test)",
+        "type": "shell",
+        "command": "npm test",
+        "options": { "cwd": "${workspaceFolder}/tests" },
+        "problemMatcher": [],
+        "group": { "kind": "test", "isDefault": true },
+        "presentation": { "reveal": "always", "panel": "dedicated" }
+      },
+      {
+        "label": "Pemeriksaan Cepat (tanpa browser)",
+        "type": "shell",
+        "command": "npm run verify",
+        "options": { "cwd": "${workspaceFolder}/tests" },
+        "problemMatcher": [],
+        "presentation": { "reveal": "always" }
+      },
+      {
+        "label": "Perbarui Tangkapan Layar",
+        "type": "shell",
+        "command": "node screenshot.js",
+        "options": { "cwd": "${workspaceFolder}/tests" },
+        "problemMatcher": [],
+        "presentation": { "reveal": "always" }
+      },
+      {
+        "label": "Buka Aplikasi di Browser",
+        "type": "shell",
+        "command": "start web\\index.html",
+        "windows": { "command": "start web\\index.html" },
+        "options": { "cwd": "${workspaceFolder}" },
+        "problemMatcher": [],
+        "presentation": { "reveal": "never" }
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# Editor & OS
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Logs & sementara
+*.log
+*.tmp
+
+# Jangan commit data pembukuan asli
+cadangan/
+Cadangan_*.json

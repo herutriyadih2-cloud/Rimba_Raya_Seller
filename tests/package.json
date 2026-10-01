@@ -1,0 +1,15 @@
+{
+  "name": "rimba-raya-seller-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pemeriksaan otomatis untuk website pembukuan RIMBA RAYA SELLER",
+  "scripts": {
+    "verify": "node verify.js",
+    "e2e": "node e2e.js",
+    "test": "node verify.js && node e2e.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "puppeteer-core": "^24.0.0"
+  }
+}
