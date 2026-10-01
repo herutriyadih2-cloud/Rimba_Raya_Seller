@@ -44,6 +44,8 @@ const lebar = lebarArg ? Number(lebarArg.split('=')[1]) : 1400;
           });
         });
       });
+      // dua reseller tambahan yang belum bertransaksi, agar daftar terlihat seperti pemakaian nyata
+      tambahReseller('Kios Mawar'); tambahReseller('Agen Cahaya');
       saveData();
       renderTable();
     });

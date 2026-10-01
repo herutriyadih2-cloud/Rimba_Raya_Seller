@@ -34,7 +34,7 @@ Naikkan angka cache-busting `?v=N` di `index.html` setiap kali aset diganti.
 ```
 cd tests
 npm install        # sekali saja
-npm test           # harus: 41 LULUS, 0 GAGAL
+npm test           # harus: 53 LULUS, 0 GAGAL
 ```
 `e2e.js` menjalankan aplikasi di Chrome sungguhan, lalu **membuka kembali file
 .xlsx dan .pdf hasil unduhan** untuk memeriksa isinya. Membaca kode saja tidak
@@ -42,6 +42,8 @@ cukup — beberapa bug di project ini hanya ketahuan dari file hasilnya.
 
 **3. Data pengguna sakral.**
 Pembukuan tersimpan di `localStorage` kunci `pembukuan_voucher_wifi_v2`.
+Daftar reseller (untuk dipilih di form) ada di kunci terpisah `pembukuan_voucher_wifi_reseller_v1`
+(array nama); nama dari transaksi otomatis ikut tampil, dan file cadangan memuatnya di `resellers`.
 Jangan ubah format record tanpa jalur migrasi, jangan hapus data tanpa
 konfirmasi, dan pastikan `parseBackup()` tetap menerima file cadangan lama.
 

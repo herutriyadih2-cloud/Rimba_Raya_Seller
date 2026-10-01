@@ -346,6 +346,31 @@
 
         .text-muted { color: var(--muted) !important; }
 
+        /* Daftar reseller: satu klik untuk memilih */
+        .chip-reseller {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px 6px 12px;
+            margin: 0 8px 8px 0;
+            border-radius: 999px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        .chip-reseller:hover { border-color: rgba(224, 165, 38, 0.6); background: rgba(224, 165, 38, 0.08); }
+        .chip-reseller.aktif { border-color: var(--primary); background: rgba(224, 165, 38, 0.14); color: var(--primary-light); }
+        .chip-reseller .hapus {
+            border: none; background: transparent; color: var(--muted);
+            padding: 0 2px; line-height: 1; font-size: 0.95rem; cursor: pointer;
+        }
+        .chip-reseller .hapus:hover { color: #f87171; }
+        .chip-reseller .jumlah { color: var(--muted); font-weight: 500; font-size: 0.75rem; }
+
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: var(--bg); }
         ::-webkit-scrollbar-thumb { background: #2f343c; border-radius: 4px; }
@@ -419,7 +444,9 @@
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label class="form-label">Nama Reseller</label>
-                                    <input type="text" class="form-control" id="namaReseller" placeholder="Contoh: Agen Pak Budi" required>
+                                    <input type="text" class="form-control" id="namaReseller" list="daftarReseller" autocomplete="off"
+                                           placeholder="Pilih atau ketik nama" required>
+                                    <datalist id="daftarReseller"></datalist>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Tanggal</label>
@@ -502,6 +529,23 @@
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-users me-2"></i>Daftar Reseller
+                        <span class="ms-auto small text-muted fw-normal" id="jumlahDaftarReseller"></span>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-3">Klik nama untuk mengisi form. Reseller baru otomatis masuk daftar saat transaksi disimpan, atau tambahkan lebih dulu di sini.</p>
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="inputResellerBaru" placeholder="Nama reseller baru" maxlength="60">
+                            <button type="button" class="btn btn-outline-custom" id="btnTambahReseller">
+                                <i class="fas fa-plus me-1"></i>Tambah
+                            </button>
+                        </div>
+                        <div id="daftarResellerChips"></div>
                     </div>
                 </div>
             </div>
@@ -694,6 +738,131 @@
             }
         }
 
+        // ============================================================
+        // DAFTAR RESELLER
+        // Disimpan di kunci terpisah, jadi format record transaksi TIDAK berubah.
+        // Daftar yang tampil = nama tersimpan + semua nama yang sudah ada di transaksi.
+        // ============================================================
+        const RESELLER_KEY = 'pembukuan_voucher_wifi_reseller_v1';
+        let daftarResellerTersimpan = [];
+
+        const rapikanNama = n => String(n == null ? '' : n).replace(/\s+/g, ' ').trim();
+
+        function muatDaftarReseller() {
+            try {
+                const arr = JSON.parse(localStorage.getItem(RESELLER_KEY) || '[]');
+                daftarResellerTersimpan = Array.isArray(arr) ? arr.map(rapikanNama).filter(Boolean) : [];
+            } catch (e) {
+                daftarResellerTersimpan = [];
+            }
+        }
+
+        function simpanDaftarReseller() {
+            localStorage.setItem(RESELLER_KEY, JSON.stringify(daftarResellerTersimpan));
+        }
+
+        // Ejaan dari transaksi didahulukan (data yang sudah ada tidak diubah); huruf besar/kecil
+        // yang berbeda dianggap nama yang sama supaya laporan tidak memecah satu reseller jadi dua.
+        function semuaReseller() {
+            const peta = new Map();
+            [...transactions.map(t => t.reseller), ...daftarResellerTersimpan].forEach(n => {
+                const k = n.toLowerCase();
+                if (!peta.has(k)) peta.set(k, n);
+            });
+            return [...peta.values()].sort((a, b) => a.localeCompare(b, 'id'));
+        }
+
+        function cariNamaResmi(n) {
+            const k = rapikanNama(n).toLowerCase();
+            return semuaReseller().find(x => x.toLowerCase() === k) || null;
+        }
+
+        // Tambah ke daftar; mengembalikan nama yang dipakai (ejaan resmi bila sudah ada).
+        function tambahReseller(n) {
+            const nama = rapikanNama(n);
+            if (!nama) return null;
+            const resmi = cariNamaResmi(nama) || nama;
+            if (!daftarResellerTersimpan.some(x => x.toLowerCase() === resmi.toLowerCase())) {
+                daftarResellerTersimpan.push(resmi);
+                simpanDaftarReseller();
+            }
+            return resmi;
+        }
+
+        function hapusDariDaftar(nama) {
+            if (transactions.some(t => t.reseller === nama)) return;   // sudah dipakai transaksi: jangan dihapus
+            if (!confirm(`Hapus "${nama}" dari daftar reseller?\n(Tidak memengaruhi transaksi apa pun.)`)) return;
+            daftarResellerTersimpan = daftarResellerTersimpan.filter(x => x !== nama);
+            simpanDaftarReseller();
+            renderDaftarReseller();
+        }
+
+        function pilihReseller(nama) {
+            document.getElementById('namaReseller').value = nama;
+            renderDaftarReseller();
+            document.getElementById('tanggal').focus();
+        }
+
+        function renderDaftarReseller() {
+            const semua = semuaReseller();
+
+            const dl = document.getElementById('daftarReseller');
+            dl.innerHTML = '';
+            semua.forEach(n => {
+                const o = document.createElement('option');
+                o.value = n;
+                dl.appendChild(o);
+            });
+
+            const aktif = rapikanNama(document.getElementById('namaReseller').value).toLowerCase();
+            const wadah = document.getElementById('daftarResellerChips');
+            wadah.innerHTML = '';
+            document.getElementById('jumlahDaftarReseller').textContent = semua.length ? semua.length + ' reseller' : '';
+            if (semua.length === 0) {
+                const kosong = document.createElement('div');
+                kosong.className = 'small text-muted';
+                kosong.textContent = 'Belum ada reseller. Tambahkan di kolom di atas.';
+                wadah.appendChild(kosong);
+                return;
+            }
+            semua.forEach(nama => {
+                const tanggalDipakai = new Set(transactions.filter(t => t.reseller === nama).map(t => t.tanggal));
+                const dipakai = tanggalDipakai.size;   // berapa kali bertransaksi (per tanggal)
+                const chip = document.createElement('span');
+                chip.className = 'chip-reseller' + (nama.toLowerCase() === aktif ? ' aktif' : '');
+                chip.title = 'Klik untuk memilih';
+                chip.addEventListener('click', () => pilihReseller(nama));
+
+                const teks = document.createElement('span');
+                teks.textContent = nama;       // textContent: nama bebas diketik, tidak boleh jadi HTML
+                chip.appendChild(teks);
+
+                if (dipakai > 0) {
+                    const j = document.createElement('span');
+                    j.className = 'jumlah';
+                    j.textContent = dipakai + 'x';
+                    chip.appendChild(j);
+                } else {
+                    const x = document.createElement('button');
+                    x.type = 'button';
+                    x.className = 'hapus';
+                    x.title = 'Hapus dari daftar';
+                    x.innerHTML = '&times;';
+                    x.addEventListener('click', ev => { ev.stopPropagation(); hapusDariDaftar(nama); });
+                    chip.appendChild(x);
+                }
+                wadah.appendChild(chip);
+            });
+        }
+
+        function aksiTambahReseller() {
+            const input = document.getElementById('inputResellerBaru');
+            const nama = tambahReseller(input.value);
+            if (!nama) return;
+            input.value = '';
+            pilihReseller(nama);
+        }
+
         function filterTransactions(list, period) {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
@@ -804,6 +973,7 @@
 
             if (sorted.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="color:#94a3b8;">Belum ada transaksi</td></tr>';
+                renderDaftarReseller();
                 hitungTotal();
                 renderResellerSummary();
                 updateExportPreview();
@@ -832,6 +1002,7 @@
                 tbody.appendChild(row);
             });
 
+            renderDaftarReseller();
             hitungTotal();
             renderResellerSummary();
             updateExportPreview();
@@ -863,13 +1034,15 @@
         document.getElementById('formTransaksi').addEventListener('submit', function(e) {
             e.preventDefault();
 
-            const reseller = document.getElementById('namaReseller').value.trim();
+            const namaDiketik = rapikanNama(document.getElementById('namaReseller').value);
             const tanggal = document.getElementById('tanggal').value;
 
-            if (!reseller) {
+            if (!namaDiketik) {
                 alert('Nama reseller tidak boleh kosong.');
                 return;
             }
+            // Masuk ke daftar (dan memakai ejaan yang sudah ada bila hanya beda huruf besar/kecil)
+            const reseller = tambahReseller(namaDiketik);
 
             const sedangEdit = editingKey !== null;
 
@@ -948,6 +1121,7 @@
         function resetForm() {
             editingKey = null;
             document.getElementById('namaReseller').value = '';
+            if (typeof renderDaftarReseller === 'function') renderDaftarReseller();
             document.getElementById('tanggal').valueAsDate = new Date();
             nominalList.forEach(n => {
                 document.getElementById(`qty${n.key}`).value = 0;
@@ -974,6 +1148,7 @@
                 version: BACKUP_VERSION,
                 dibuat: new Date().toISOString(),
                 jumlahRecord: transactions.length,
+                resellers: semuaReseller(),     // daftar reseller (opsional; file lama tanpa kolom ini tetap sah)
                 transactions: transactions
             };
             const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1049,6 +1224,12 @@
                         else transactions.push(m);
                     });
                 }
+
+                // Daftar reseller dari cadangan (jika ada) digabung ke daftar yang sekarang
+                try {
+                    const d = JSON.parse(ev.target.result);
+                    if (d && Array.isArray(d.resellers)) d.resellers.forEach(tambahReseller);
+                } catch (e) { /* cadangan lama berupa array polos: tidak ada daftar */ }
 
                 saveData();
                 resetForm();
@@ -2329,6 +2510,12 @@
 
         // Initialize
         loadData();
+        muatDaftarReseller();
+        document.getElementById('btnTambahReseller').addEventListener('click', aksiTambahReseller);
+        document.getElementById('inputResellerBaru').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); aksiTambahReseller(); }
+        });
+        document.getElementById('namaReseller').addEventListener('input', renderDaftarReseller);
         renderTable();
     </script>
 </body>

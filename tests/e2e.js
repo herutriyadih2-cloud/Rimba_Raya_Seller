@@ -136,6 +136,8 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   cek('file cadangan .json terunduh', fs.statSync(fileBackup).size > 0);
   cek('cadangan berisi 8 baris', isi.transactions.length === 8, 'dapat ' + (isi.transactions || []).length);
   cek('cadangan mencatat versi & tanggal', isi.version === 1 && !!isi.dibuat);
+  cek('cadangan memuat daftar reseller', Array.isArray(isi.resellers) && isi.resellers.includes('Budi Reseller'),
+    JSON.stringify(isi.resellers));
 
   // 8. RESTORE (mode GANTI, karena dialog otomatis di-accept)
   await page.evaluate(() => { transactions = []; saveData(); renderTable(); });
@@ -156,6 +158,63 @@ async function isiForm(page, nama, tanggal, qtyHarga) {
   await new Promise(r => setTimeout(r, 800));
   cek('file cadangan rusak ditolak tanpa merusak data',
     await page.evaluate(() => transactions.length === 8));
+
+  // 9b. DAFTAR RESELLER: pilih tanpa mengetik ulang
+  await page.type('#inputResellerBaru', '  Toko   Baru Sejahtera ');
+  await page.click('#btnTambahReseller');
+  let dr = await page.evaluate(() => ({
+    chips: [...document.querySelectorAll('#daftarResellerChips .chip-reseller')].map(c => c.firstChild.textContent),
+    opsi: [...document.querySelectorAll('#daftarReseller option')].map(o => o.value),
+    form: document.getElementById('namaReseller').value
+  }));
+  cek('reseller baru masuk daftar (spasi dirapikan) & pilihan form',
+    dr.chips.includes('Toko Baru Sejahtera') && dr.opsi.includes('Toko Baru Sejahtera'), JSON.stringify(dr.chips));
+  cek('menambah reseller langsung mengisi form', dr.form === 'Toko Baru Sejahtera', dr.form);
+  cek('reseller lama (dari transaksi) ikut muncul di daftar',
+    dr.chips.includes('Budi Reseller') && dr.chips.includes('Siti Agen'), JSON.stringify(dr.chips));
+
+  // klik nama = mengisi form
+  await page.evaluate(() => { document.getElementById('namaReseller').value = ''; renderDaftarReseller(); });
+  await page.evaluate(() => {
+    [...document.querySelectorAll('#daftarResellerChips .chip-reseller')]
+      .find(c => c.firstChild.textContent === 'Siti Agen').click();
+  });
+  cek('klik nama di daftar mengisi form', await page.evaluate(() => document.getElementById('namaReseller').value === 'Siti Agen'));
+
+  dr = await page.evaluate(() => {
+    const dipakai = new Set(transactions.map(t => t.reseller));
+    const chips = [...document.querySelectorAll('#daftarResellerChips .chip-reseller')];
+    return {
+      salah: chips.filter(c => !!c.querySelector('.hapus') === dipakai.has(c.firstChild.textContent)).map(c => c.firstChild.textContent),
+      namaResmi: tambahReseller('toko BARU sejahtera'),
+      jumlahSetelah: semuaReseller().filter(n => n.toLowerCase() === 'toko baru sejahtera').length,
+      imgNakal: document.querySelectorAll('#daftarResellerChips img, #daftarReseller img').length
+    };
+  });
+  cek('tombol hapus hanya untuk reseller yang belum punya transaksi', dr.salah.length === 0, dr.salah.join(' ; '));
+  cek('huruf besar/kecil berbeda memakai ejaan yang sudah ada, tidak dobel',
+    dr.namaResmi === 'Toko Baru Sejahtera' && dr.jumlahSetelah === 1, dr.namaResmi + ' / ' + dr.jumlahSetelah);
+  cek('nama berbau HTML di daftar tidak jadi elemen nyata', dr.imgNakal === 0);
+
+  // tersimpan permanen & tidak mengubah data transaksi
+  await page.reload({ waitUntil: 'networkidle0' });
+  dr = await page.evaluate(() => ({
+    chips: [...document.querySelectorAll('#daftarResellerChips .chip-reseller')].map(c => c.firstChild.textContent),
+    baris: transactions.length
+  }));
+  cek('daftar reseller tetap ada setelah halaman dimuat ulang', dr.chips.includes('Toko Baru Sejahtera'), JSON.stringify(dr.chips));
+  cek('daftar reseller tidak menambah/mengubah transaksi', dr.baris === 8, 'dapat ' + dr.baris);
+
+  // hapus dari daftar (yang belum dipakai) tidak menyentuh transaksi
+  await page.evaluate(() => hapusDariDaftar('Toko Baru Sejahtera'));
+  dr = await page.evaluate(() => ({ ada: semuaReseller().includes('Toko Baru Sejahtera'), baris: transactions.length }));
+  cek('hapus dari daftar berhasil & transaksi utuh', dr.ada === false && dr.baris === 8, JSON.stringify(dr));
+
+  // cadangan lama (array polos, tanpa daftar reseller) tetap diterima
+  const lama = await page.evaluate(() => parseBackup(JSON.stringify([
+    { id: 1, reseller: 'Lama', tanggal: '2026-09-01', nominal: 2000, nominalLabel: 'Rp 2.000', qty: 3, harga: 1600, total: 4800 }
+  ])).length);
+  cek('cadangan format lama tetap bisa dibaca', lama === 1, String(lama));
 
   // 10. EXPORT EXCEL
   errorKonsol.length = 0;
