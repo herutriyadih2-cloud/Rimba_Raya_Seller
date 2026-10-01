@@ -16,18 +16,19 @@
     <link rel="stylesheet" href="assets/css/inter.css?v=3">
     <style>
         :root {
-            --bg: #080c14;
-            --surface: #0f1525;
-            --surface-2: #141d2f;
-            --border: #1e2a42;
-            --primary: #6366f1;
-            --primary-light: #818cf8;
-            --accent: #22d3ee;
-            --success: #34d399;
+            --bg: #07080a;
+            --surface: #0f1114;
+            --surface-2: #15181d;
+            --border: #262b33;
+            --primary: #e0a526;
+            --primary-light: #f5c451;
+            --primary-rgb: 224, 165, 38;
+            --accent: #f5c451;
+            --success: #e0a526;
             --warning: #fbbf24;
-            --purple: #a78bfa;
-            --text: #e2e8f0;
-            --muted: #94a3b8;
+            --purple: #e5e7eb;
+            --text: #e5e7eb;
+            --muted: #9ca3af;
         }
 
         * { box-sizing: border-box; }
@@ -45,8 +46,8 @@
             position: fixed;
             inset: 0;
             background:
-                radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.08), transparent 35%),
-                radial-gradient(circle at 85% 25%, rgba(34, 211, 238, 0.06), transparent 35%);
+                radial-gradient(circle at 15% 10%, rgba(224, 165, 38, 0.07), transparent 35%),
+                radial-gradient(circle at 90% 20%, rgba(255, 255, 255, 0.03), transparent 35%);
             pointer-events: none;
             z-index: -1;
         }
@@ -56,7 +57,7 @@
         }
 
         .navbar {
-            background: rgba(15, 21, 37, 0.85);
+            background: rgba(11, 13, 16, 0.88);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border-bottom: 1px solid var(--border);
@@ -136,28 +137,28 @@
             background: var(--bg);
             border-color: var(--primary);
             color: var(--text);
-            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+            box-shadow: 0 0 0 4px rgba(224, 165, 38, 0.14);
             outline: none;
         }
 
         .form-control::placeholder { color: #64748b; }
 
         .btn-primary-custom {
-            background: linear-gradient(135deg, var(--primary), #4f46e5);
+            background: linear-gradient(135deg, var(--primary-light), var(--primary));
             border: none;
-            color: #fff;
+            color: #14110a;
             font-weight: 700;
             border-radius: 10px;
             padding: 12px 20px;
             transition: all 0.2s ease;
-            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+            box-shadow: 0 4px 14px rgba(224, 165, 38, 0.28);
         }
 
         .btn-primary-custom:hover {
-            background: linear-gradient(135deg, #4f46e5, var(--primary));
-            color: #fff;
+            background: linear-gradient(135deg, var(--primary), #c98f14);
+            color: #14110a;
             transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+            box-shadow: 0 6px 20px rgba(224, 165, 38, 0.45);
         }
 
         .btn-outline-custom {
@@ -171,9 +172,9 @@
         }
 
         .btn-outline-custom:hover {
-            background: rgba(99, 102, 241, 0.08);
+            background: rgba(224, 165, 38, 0.08);
             color: var(--primary-light);
-            border-color: rgba(99, 102, 241, 0.5);
+            border-color: rgba(224, 165, 38, 0.5);
         }
 
         .summary-card {
@@ -220,33 +221,33 @@
         }
 
         .bg-soft-success {
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.03));
-            border-color: rgba(16, 185, 129, 0.25);
-            color: #34d399;
+            background: linear-gradient(135deg, rgba(224, 165, 38, 0.14), rgba(224, 165, 38, 0.03));
+            border-color: rgba(224, 165, 38, 0.3);
+            color: #f5c451;
         }
-        .bg-soft-success::before { background: #10b981; }
+        .bg-soft-success::before { background: #e0a526; }
 
         .bg-soft-purple {
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(139, 92, 246, 0.03));
-            border-color: rgba(139, 92, 246, 0.25);
-            color: #a78bfa;
+            background: linear-gradient(135deg, rgba(229, 231, 235, 0.10), rgba(229, 231, 235, 0.02));
+            border-color: rgba(229, 231, 235, 0.22);
+            color: #e5e7eb;
         }
-        .bg-soft-purple::before { background: #8b5cf6; }
+        .bg-soft-purple::before { background: #e5e7eb; }
 
         .bg-soft-info {
-            background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.03));
-            border-color: rgba(34, 211, 238, 0.25);
-            color: #22d3ee;
+            background: linear-gradient(135deg, rgba(217, 119, 6, 0.16), rgba(217, 119, 6, 0.03));
+            border-color: rgba(217, 119, 6, 0.32);
+            color: #f59e0b;
         }
-        .bg-soft-info::before { background: #22d3ee; }
+        .bg-soft-info::before { background: #b45309; }
 
         .nominal-badge {
             font-size: 0.78rem;
             padding: 6px 12px;
             border-radius: 8px;
-            background: rgba(99, 102, 241, 0.12);
+            background: rgba(224, 165, 38, 0.12);
             color: var(--primary-light);
-            border: 1px solid rgba(99, 102, 241, 0.3);
+            border: 1px solid rgba(224, 165, 38, 0.32);
             font-weight: 700;
             display: inline-block;
             margin-bottom: 10px;
@@ -262,32 +263,45 @@
         }
 
         .voucher-box:hover {
-            border-color: rgba(99, 102, 241, 0.5);
-            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.1);
+            border-color: rgba(224, 165, 38, 0.5);
+            box-shadow: 0 4px 16px rgba(224, 165, 38, 0.1);
         }
 
         .table-responsive {
             border-radius: 12px;
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
             border: 1px solid var(--border);
         }
 
         .table {
+            --bs-table-color: var(--text);
+            --bs-table-bg: transparent;
+            --bs-table-border-color: var(--border);
             color: var(--text);
+            background: transparent;
             margin-bottom: 0;
             border-collapse: separate;
             border-spacing: 0;
         }
 
+        .table > :not(caption) > * > * {
+            background-color: transparent;
+            color: var(--text);
+            box-shadow: none;
+        }
+
         .table thead th {
-            background: linear-gradient(180deg, #1e3a8a, #312e81);
+            background: linear-gradient(180deg, #1a1d23, #0b0d10) !important;
             color: #fff;
             border: none;
-            padding: 14px;
+            border-bottom: 2px solid var(--primary);
+            padding: 14px 8px;
             font-weight: 600;
             font-size: 0.72rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            white-space: nowrap;
         }
 
         .table thead th:first-child { border-radius: 12px 0 0 0; }
@@ -295,21 +309,37 @@
 
         .table tbody td {
             border-bottom: 1px solid var(--border);
-            padding: 12px;
+            padding: 10px 8px;
             vertical-align: middle;
         }
 
         .table tbody tr:last-child td { border-bottom: none; }
 
-        .table tbody tr:hover td {
-            background: rgba(99, 102, 241, 0.06);
+        .table tbody tr:hover > td {
+            background: rgba(224, 165, 38, 0.07);
         }
 
-        .money { font-weight: 700; color: #f8fafc; }
+        .table td.nowrap, .table th.nowrap { white-space: nowrap; }
+        .table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+        .money { font-weight: 700; color: #f8fafc; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+
+        /* Tombol aksi di tabel & teks "primary" bawaan Bootstrap diseragamkan ke emas */
+        .btn-outline-primary {
+            --bs-btn-color: var(--primary-light);
+            --bs-btn-border-color: rgba(224, 165, 38, 0.5);
+            --bs-btn-hover-bg: var(--primary);
+            --bs-btn-hover-border-color: var(--primary);
+            --bs-btn-hover-color: #14110a;
+            --bs-btn-active-bg: var(--primary);
+            --bs-btn-active-border-color: var(--primary);
+            --bs-btn-active-color: #14110a;
+        }
+        .text-primary { color: var(--primary-light) !important; }
 
         .export-panel {
             background: var(--surface-2);
-            border: 1px dashed rgba(99, 102, 241, 0.4);
+            border: 1px dashed rgba(224, 165, 38, 0.4);
             border-radius: 14px;
             padding: 20px;
         }
@@ -318,8 +348,8 @@
 
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: var(--bg); }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        ::-webkit-scrollbar-thumb { background: #2f343c; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4b525d; }
 
         @media print {
             .no-print, .export-panel, .btn, form { display: none !important; }
@@ -492,10 +522,10 @@
                                         <th>Tanggal</th>
                                         <th>Reseller</th>
                                         <th>Nominal</th>
-                                        <th>Jumlah</th>
-                                        <th>Harga/Voucher</th>
-                                        <th>Total</th>
-                                        <th class="no-print">Aksi</th>
+                                        <th class="num">Jumlah</th>
+                                        <th class="num">Harga/Voucher</th>
+                                        <th class="num">Total</th>
+                                        <th class="no-print text-center">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tbodyTransaksi">
@@ -519,8 +549,8 @@
                                 <thead>
                                     <tr>
                                         <th>Reseller</th>
-                                        <th>Total Jumlah</th>
-                                        <th>Total Nilai</th>
+                                        <th class="num">Total Jumlah</th>
+                                        <th class="num">Total Nilai</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tbodyReseller">
@@ -784,10 +814,10 @@
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${index + 1}</td>
-                    <td>${escapeHtml(t.tanggal)}</td>
+                    <td class="nowrap">${escapeHtml(tglPanjang(t.tanggal))}</td>
                     <td><strong>${escapeHtml(t.reseller)}</strong></td>
-                    <td>${escapeHtml(t.nominalLabel)}</td>
-                    <td>${formatNumber(t.qty)}</td>
+                    <td class="nowrap">${escapeHtml(t.nominalLabel)}</td>
+                    <td class="num">${formatNumber(t.qty)}</td>
                     <td class="money">${formatRupiah(t.harga)}</td>
                     <td class="money">${formatRupiah(t.total)}</td>
                     <td class="no-print text-nowrap">
@@ -818,12 +848,12 @@
             }
 
             const map = computeResellerSummary(transactions);
-            Object.keys(map).sort().forEach(nama => {
+            Object.keys(map).sort((a, b) => map[b].nilai - map[a].nilai || a.localeCompare(b)).forEach(nama => {
                 const r = map[nama];
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td><strong>${escapeHtml(nama)}</strong></td>
-                    <td>${formatNumber(r.qty)} pcs</td>
+                    <td class="num">${formatNumber(r.qty)} pcs</td>
                     <td class="money">${formatRupiah(r.nilai)}</td>
                 `;
                 tbody.appendChild(row);
