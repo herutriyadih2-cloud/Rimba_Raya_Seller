@@ -39,6 +39,10 @@ herutriyadih2-cloud.github.io
 ## Setelah DNS diperbarui
 - Propagasi DNS biasanya memakan waktu **5 menit - 48 jam**.
 - Setelah aktif, buka https://rimbarayaseller.my.id/
+- Jika muncul halaman **Parked Domain name on Hostinger DNS system**, berarti Hostinger CDN/Parking Page masih aktif. Coba:
+  1. Matikan fitur **Parking Page** / **Default Page** di Hostinger
+  2. Tunggu 15-60 menit agar CDN Hostinger update cache
+  3. Coba akses dari jaringan lain atau mode incognito
 - Jika muncul error certificate HTTPS, tunggu beberapa menit hingga GitHub memproses SSL.
 
 ## Keamanan Penting
